@@ -3,7 +3,13 @@
   "changelog": "@changesets/cli/changelog",
   "commit": false,
   "fixed": [],
-  "linked": [],
+  "linked": [
+    [
+      "@wso2/backstage-plugin-wso2-api-platform",
+      "@wso2/backstage-plugin-wso2-api-platform-backend",
+      "@wso2/backstage-plugin-catalog-backend-module-wso2-api-platform"
+    ]
+  ],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",

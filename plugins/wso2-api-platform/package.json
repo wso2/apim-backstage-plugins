@@ -13,12 +13,13 @@
   "publishConfig": {
     "access": "public",
     "main": "dist/index.esm.js",
-    "types": "dist/index.d.ts"
+    "types": "dist/index.d.ts",
+    "registry": "https://npm.pkg.github.com"
   },
-  "homepage": "https://backstage.io",
+  "homepage": "https://github.com/wso2/apim-backstage-plugins",
   "repository": {
     "type": "git",
-    "url": "https://github.com/backstage/backstage",
+    "url": "https://github.com/wso2/apim-backstage-plugins.git",
     "directory": "plugins/wso2-api-platform"
   },
   "license": "Apache-2.0",
