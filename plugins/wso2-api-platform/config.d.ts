@@ -46,6 +46,35 @@ export interface Config {
          */
         allowedExtensions?: string[];
       };
+      definitions?: {
+        /**
+         * @visibility frontend
+         */
+        maxSizeKb?: number;
+      };
+    };
+    /**
+     * Frontend-visible Policy Hub configuration. The Policies tab's policy
+     * editor calls the Policy Hub directly from the browser, so its base URL
+     * must be readable client-side. Falls back to the platform's public
+     * Policy Hub instance when unset.
+     */
+    policyHub?: {
+      /**
+       * @visibility frontend
+       */
+      baseUrl?: string;
+    };
+    /**
+     * Frontend-visible API Portal base URL. The Overview tab's "Publish to
+     * API Portal" dialog and "Open API Portal" link display and navigate to
+     * this URL directly from the browser.
+     */
+    apiPortal?: {
+      /**
+       * @visibility frontend
+       */
+      baseUrl?: string;
     };
   };
   wso2ApiPlatformGateway?: {

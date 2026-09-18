@@ -6,6 +6,18 @@ export type Wso2GatewayInfo = {
   gatewayType: string;
 };
 
+/** Gateway status returned by `GET /gateways`. */
+export type Wso2GatewaySummary = {
+  name: string;
+  type: string;
+  gatewayType: string;
+  description?: string;
+  source: string;
+  urls: string[];
+  status: 'Online' | 'Offline';
+  active?: boolean;
+};
+
 export type Wso2ApiSummary = {
   id: string;
   name: string;
@@ -192,6 +204,83 @@ export type UpdateWso2ApiDocumentMetadataRequest = {
   /** only honoured when the stored document's sourceType is URL */
   sourceUrl?: string;
 };
+export type Wso2ApiDefinitionFormat = 'YAML' | 'JSON';
+
+export type Wso2ApiDefinition = {
+  content: string;
+  format: Wso2ApiDefinitionFormat;
+  description?: string;
+  fileName?: string;
+  sizeBytes?: number;
+  createdBy?: string;
+  createdTime?: string;
+  lastUpdatedBy?: string;
+  lastUpdatedTime?: string;
+};
+
+export type Wso2ApiDefinitionCapabilities = {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+};
+
+export type Wso2ApiDefinitionResponse = {
+  definition: Wso2ApiDefinition | null;
+  capabilities: Wso2ApiDefinitionCapabilities;
+};
+
+export type UpsertWso2ApiDefinitionRequest = {
+  fileName: string;
+  content: string;
+};
+
+export type Wso2RestApiArtifactDiff = {
+  displayNameChange?: { from: string; to: string };
+  versionChange?: { from: string; to: string };
+  descriptionChange?: { from: string; to: string };
+  addedOperations: Array<{ method: string; path: string }>;
+  removedOperations: Array<{ method: string; path: string }>;
+  hasChanges: boolean;
+};
+
+export type Wso2DefinitionDiffResponse = {
+  diff: Wso2RestApiArtifactDiff | null;
+};
+
+export type Wso2ApiPolicyArtifact = {
+  apiPolicies: unknown;
+  operations: Array<{ method: string; path: string; policies: unknown }>;
+};
+
+export type Wso2ApiPolicyArtifactResponse = {
+  policies: Wso2ApiPolicyArtifact;
+};
+
+export type UpsertWso2ApiPolicyArtifactRequest = Wso2ApiPolicyArtifact;
+
+export type Wso2PolicyChangeRef = { name: string; version: string };
+
+export type Wso2PolicyFlowDiff = {
+  flow: 'request' | 'response' | 'fault' | 'flat';
+  added: Wso2PolicyChangeRef[];
+  removed: Wso2PolicyChangeRef[];
+  changed: Wso2PolicyChangeRef[];
+};
+
+export type Wso2ApiPolicyDiff = {
+  apiLevel: Wso2PolicyFlowDiff[];
+  operations: Array<{
+    method: string;
+    path: string;
+    flows: Wso2PolicyFlowDiff[];
+  }>;
+  hasChanges: boolean;
+};
+
+export type Wso2PolicyDiffResponse = {
+  diff: Wso2ApiPolicyDiff | null;
+};
+
 export type Wso2ApiRevision = {
   id: string;
   displayName: string;
@@ -246,6 +335,37 @@ export type Wso2GenerateApiKeyOptions = {
   };
 };
 
+export type Wso2ApiPortalCapabilities = {
+  publish: boolean;
+  reason?: string;
+};
+
+export type Wso2ApiPortalInfo = {
+  enabled: boolean;
+  capabilities: Wso2ApiPortalCapabilities;
+};
+
+export type Wso2ApiPortalSkippedDocument = {
+  name: string;
+  sourceType: string;
+  reason: string;
+};
+
+export type Wso2ApiPortalPublishResult = {
+  portalApiId: string;
+  portalUrl: string;
+  operation: 'created' | 'updated';
+  publishedAt: string;
+  documents: { published: number; skipped: Wso2ApiPortalSkippedDocument[] };
+  warnings: string[];
+};
+
+export type Wso2ApiPortalPublishOverrides = {
+  displayName: string;
+  productionEndpoint: string;
+  sandboxEndpoint?: string;
+};
+
 export interface Wso2ApiPlatformApi {
   generateApiKey(
     apiId: string,
@@ -255,7 +375,7 @@ export interface Wso2ApiPlatformApi {
     apiId: string,
     options?: { query?: string; token?: string },
   ): Promise<Wso2ApiRevisionsResponse>;
-  getGateways(token?: string): Promise<any[]>;
+  getGateways(token?: string): Promise<Wso2GatewaySummary[]>;
   getRuntimeConfig(token?: string): Promise<Wso2ApiPlatformRuntimeConfig>;
   getApiWsdl(apiId: string, token?: string): Promise<Blob>;
   listDocuments(
@@ -282,4 +402,33 @@ export interface Wso2ApiPlatformApi {
     entityRef: CompoundEntityRef,
     documentId: string,
   ): Promise<string>;
+  getDefinition(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiDefinitionResponse>;
+  upsertDefinition(
+    entityRef: CompoundEntityRef,
+    input: UpsertWso2ApiDefinitionRequest,
+  ): Promise<Wso2ApiDefinitionResponse>;
+  deleteDefinition(entityRef: CompoundEntityRef): Promise<void>;
+  previewDefinitionDiff(
+    entityRef: CompoundEntityRef,
+    content: string,
+  ): Promise<Wso2DefinitionDiffResponse>;
+  getPolicyArtifact(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiPolicyArtifactResponse>;
+  upsertPolicyArtifact(
+    entityRef: CompoundEntityRef,
+    input: UpsertWso2ApiPolicyArtifactRequest,
+  ): Promise<Wso2ApiPolicyArtifactResponse>;
+  previewPolicyDiff(
+    entityRef: CompoundEntityRef,
+    input: Wso2ApiPolicyArtifact,
+  ): Promise<Wso2PolicyDiffResponse>;
+  getApiPortalInfo(entityRef: CompoundEntityRef): Promise<Wso2ApiPortalInfo>;
+  publishToApiPortal(
+    entityRef: CompoundEntityRef,
+    accessToken: string,
+    overrides: Wso2ApiPortalPublishOverrides,
+  ): Promise<Wso2ApiPortalPublishResult>;
 }

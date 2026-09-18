@@ -113,6 +113,27 @@ describe('Wso2ApiPlatformClient', () => {
       );
     });
 
+    it('should surface just the backend error message for a JSON error envelope', async () => {
+      mockFetchApi.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        text: jest.fn().mockResolvedValueOnce(
+          JSON.stringify({
+            error: {
+              name: 'ConflictError',
+              message: 'Something went wrong on the backend.',
+              stack: 'ConflictError: Something went wrong on the backend...',
+            },
+          }),
+        ),
+      } as any);
+
+      await expect(client.generateApiKey('api-123')).rejects.toThrow(
+        'Something went wrong on the backend.',
+      );
+    });
+
     it('should return empty object if response is empty', async () => {
       mockFetchApi.fetch.mockResolvedValueOnce({
         ok: true,

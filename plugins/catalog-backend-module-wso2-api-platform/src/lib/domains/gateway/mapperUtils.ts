@@ -25,13 +25,12 @@ import { normalizeEntityName, resolveApiType } from '../api';
 export function mapDiscoveredApiToEntity(api: any): ApiEntity {
   const spec = api.fullConfig.spec;
   const displayName = spec.displayName;
-  const normalizedName = normalizeEntityName(displayName);
+  const version = spec.version || '1.0.0';
+  const context = api.context || spec.context || '/';
+  const normalizedName = normalizeEntityName(`${displayName}-${version}`);
   const discoveryNamespace = 'wso2-gateways';
-  const isOpenChoreo = api.integration === 'openchoreo';
-  const gatewayLabel = isOpenChoreo ? 'OpenChoreo' : 'Self Hosted';
-  const discoveryType = isOpenChoreo
-    ? 'openchoreo-gateway'
-    : 'self-hosted-gateway';
+  const gatewayLabel = 'API Platform';
+  const discoveryType = 'api-platform-gateway';
 
   return {
     apiVersion: 'backstage.io/v1alpha1',
@@ -40,16 +39,13 @@ export function mapDiscoveredApiToEntity(api: any): ApiEntity {
       name: normalizedName,
       namespace: discoveryNamespace,
       title: displayName,
-      description:
-        api.description ||
-        `Discovered API from Gateway: ${api.environmentName}`,
       annotations: {
         'backstage.io/managed-by-location': `wso2-gateway:${api.environmentName}`,
         'backstage.io/managed-by-origin-location': `wso2-gateway:${api.environmentName}`,
         'wso2-gateway.com/api-id': api.id,
         'wso2-gateway.com/api-name': displayName,
-        'wso2-gateway.com/api-version': spec.version || '1.0.0',
-        'wso2-gateway.com/api-context': spec.context || '/',
+        'wso2-gateway.com/api-version': version,
+        'wso2-gateway.com/api-context': context,
         'wso2.com/api-type': resolveApiType(api, spec),
         'wso2.com/api-gateway': gatewayLabel,
         'wso2.com/api-discovery-type': discoveryType,
@@ -60,9 +56,7 @@ export function mapDiscoveredApiToEntity(api: any): ApiEntity {
             gatewayType: gatewayLabel,
             urls: (api.gatewayUrls || []).map((u: string) => {
               const base = u.replace(/\/$/, '');
-              const ctx = spec.context?.startsWith('/')
-                ? spec.context
-                : `/${spec.context || '/'}`;
+              const ctx = context.startsWith('/') ? context : `/${context}`;
               return `${base}${ctx.replace(/\/$/, '')}`;
             }),
           },

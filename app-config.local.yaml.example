@@ -42,8 +42,6 @@ catalog:
 wso2ApiPlatform:
   baseUrl: https://127.0.0.1:9443
   tls:
-    # Local/self-signed HTTPS certificates often are not trusted by Node.
-    # Use this only with local development config, not production.
     rejectUnauthorized: false
   publisherBasePath: /api/am/publisher/v4
   developerBasePath: /api/am/devportal/v3
@@ -52,14 +50,21 @@ wso2ApiPlatform:
     clientId: your_client_id_here
     clientSecret: your_client_secret_here
     tokenUrl: https://127.0.0.1:9443/oauth2/token
+  apiPortal:
+    enabled: true
+    baseUrl: https://localhost:9543
+    auth:
+      mode: platform-login
+    tls:
+      rejectUnauthorized: false
 
-# Self-Hosted Gateway Discovery Configuration
+# Self-Hosted Gateway Configuration
 wso2ApiPlatformGateway:
   enabled: true
   gateways:
     - name: Self-Hosted-1
-      urls:
+      runtimeUrls:
         - http://development-default.openchoreoapis.localhost:8080
-      discoveryUrl: http://development-default.openchoreoapis.localhost:9090/rest-apis
-      discoveryUsername: admin
-      discoveryPassword: admin
+      managementApiUrl: http://development-default.openchoreoapis.localhost:9090/rest-apis
+      managementApiUsername: admin
+      managementApiPassword: admin

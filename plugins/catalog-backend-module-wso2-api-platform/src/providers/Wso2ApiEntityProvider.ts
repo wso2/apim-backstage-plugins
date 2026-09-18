@@ -152,21 +152,18 @@ export class Wso2ApiEntityProvider implements EntityProvider {
     return gatewayConfigs.map(gw => ({
       environmentName: gw.getString('name'),
       environmentType: gw.getOptionalString('environmentType') || 'WSO2',
-      urls: gw.getStringArray('urls'),
-      discoveryUrl: gw.getString('discoveryUrl'),
-      discoveryAuth:
-        gw.getString('discoveryUsername') && gw.getString('discoveryPassword')
+      runtimeUrls: gw.getStringArray('runtimeUrls'),
+      managementApiUrl: gw.getString('managementApiUrl'),
+      managementApiAuth:
+        gw.getString('managementApiUsername') &&
+        gw.getString('managementApiPassword')
           ? `Basic ${Buffer.from(
-              `${gw.getString('discoveryUsername')}:${gw.getString(
-                'discoveryPassword',
+              `${gw.getString('managementApiUsername')}:${gw.getString(
+                'managementApiPassword',
               )}`,
             ).toString('base64')}`
           : undefined,
       organizationId: gw.getOptionalString('organizationId'),
-      integration:
-        gw.getOptionalString('integration') === 'openchoreo'
-          ? 'openchoreo'
-          : 'self-hosted',
     }));
   }
 

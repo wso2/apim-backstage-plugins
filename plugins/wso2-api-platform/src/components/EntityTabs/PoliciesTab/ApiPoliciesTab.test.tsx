@@ -4,8 +4,15 @@ import '@testing-library/jest-dom';
 import { EntityWso2ApiPoliciesTab } from './ApiPoliciesTab';
 import { useEntity } from '@backstage/plugin-catalog-react';
 import { useWso2ApiPolicies } from './hooks/useApiPolicies';
+import { usePolicyAccessMode } from './hooks/usePolicyAccessMode';
+import { usePolicyArtifact } from './hooks/usePolicyArtifact';
+import { usePolicyMutations } from './hooks/usePolicyMutations';
 import { ThemeProvider } from '@material-ui/core/styles';
 import { lightTheme } from '@backstage/theme';
+
+jest.mock('../DefinitionTab/SwaggerDefinitionPreview', () => ({
+  SwaggerDefinitionPreview: () => null,
+}));
 
 jest.mock('@backstage/core-components', () => ({
   InfoCard: ({ children }: any) => {
@@ -30,11 +37,26 @@ jest.mock('@backstage/plugin-catalog-react', () => ({
 jest.mock('@backstage/core-plugin-api', () => ({
   useApi: jest.fn(),
   createApiRef: jest.fn().mockReturnValue({}),
+  createRouteRef: jest.fn().mockReturnValue({}),
+  createExternalRouteRef: jest.fn().mockReturnValue({}),
+  useRouteRef: () => () => '/wso2-api-platform',
   alertApiRef: { id: 'alertApiRef' },
 }));
 
 jest.mock('./hooks/useApiPolicies', () => ({
   useWso2ApiPolicies: jest.fn(),
+}));
+
+jest.mock('./hooks/usePolicyAccessMode', () => ({
+  usePolicyAccessMode: jest.fn(),
+}));
+
+jest.mock('./hooks/usePolicyArtifact', () => ({
+  usePolicyArtifact: jest.fn(),
+}));
+
+jest.mock('./hooks/usePolicyMutations', () => ({
+  usePolicyMutations: jest.fn(),
 }));
 
 jest.mock('./components/PublisherPoliciesList', () => ({
@@ -44,6 +66,17 @@ jest.mock('./components/PublisherPoliciesList', () => ({
       'div',
       { 'data-testid': 'policies-list' },
       'Policies List',
+    );
+  },
+}));
+
+jest.mock('./components/PolicyEditor', () => ({
+  PolicyEditorView: () => {
+    const React = require('react');
+    return React.createElement(
+      'div',
+      { 'data-testid': 'policy-editor' },
+      'Policy Editor',
     );
   },
 }));
@@ -59,6 +92,25 @@ describe('EntityWso2ApiPoliciesTab', () => {
       gatewayApiPolicies: [],
       isPlaceholder: false,
       isRevisionsLoading: false,
+    });
+    (usePolicyAccessMode as jest.Mock).mockReturnValue({
+      mode: 'read-only',
+      editingDisabledReason: undefined,
+      isGatewayDiscovered: false,
+    });
+    (usePolicyArtifact as jest.Mock).mockReturnValue({
+      artifact: null,
+      loading: false,
+      error: undefined,
+      refresh: jest.fn(),
+    });
+    (usePolicyMutations as jest.Mock).mockReturnValue({
+      submitting: false,
+      previewing: false,
+      snackbar: { open: false, message: '', severity: 'success' },
+      closeSnackbar: jest.fn(),
+      upsertPolicies: jest.fn(),
+      previewDiff: jest.fn(),
     });
   });
 
@@ -186,5 +238,87 @@ describe('EntityWso2ApiPoliciesTab', () => {
 
     renderComponent();
     expect(screen.getByText('Discovered API')).toBeInTheDocument();
+  });
+
+  it('renders the policy editor for editable (API Platform gateway) APIs', () => {
+    (useEntity as jest.Mock).mockReturnValue({
+      entity: {
+        metadata: {
+          annotations: {
+            'wso2.com/api-id': '123',
+            'wso2.com/api-discovery-type': 'api-platform-gateway',
+          },
+        },
+        spec: { type: 'api' },
+      },
+    });
+
+    (usePolicyAccessMode as jest.Mock).mockReturnValue({
+      mode: 'editable',
+      editingDisabledReason: undefined,
+      isGatewayDiscovered: true,
+    });
+
+    (useWso2ApiPolicies as jest.Mock).mockReturnValue({
+      isDefinitionLoading: false,
+      isPlaceholder: false,
+      definition: {},
+      details: { apiPolicies: { request: [{ policyName: 'test' }] } },
+      gatewayOperations: [],
+      gatewayApiPolicies: {},
+    });
+
+    (usePolicyArtifact as jest.Mock).mockReturnValue({
+      artifact: {
+        apiPolicies: { request: [{ name: 'cors', version: 'v1' }] },
+        operations: [{ method: 'GET', path: '/books', policies: [] }],
+      },
+      loading: false,
+      error: undefined,
+      refresh: jest.fn(),
+    });
+
+    renderComponent();
+    expect(screen.getByTestId('policy-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('policies-list')).not.toBeInTheDocument();
+  });
+
+  it('renders the policy editor once the live artifact loads, even with no policies/operations yet (a fresh API)', () => {
+    (useEntity as jest.Mock).mockReturnValue({
+      entity: {
+        metadata: {
+          annotations: {
+            'wso2.com/api-id': '123',
+            'wso2.com/api-discovery-type': 'api-platform-gateway',
+          },
+        },
+        spec: { type: 'api' },
+      },
+    });
+
+    (usePolicyAccessMode as jest.Mock).mockReturnValue({
+      mode: 'editable',
+      editingDisabledReason: undefined,
+      isGatewayDiscovered: true,
+    });
+
+    (useWso2ApiPolicies as jest.Mock).mockReturnValue({
+      isDefinitionLoading: false,
+      isPlaceholder: false,
+      definition: {},
+      details: { apiPolicies: null, operations: [] },
+      gatewayOperations: [],
+      gatewayApiPolicies: {},
+    });
+
+    (usePolicyArtifact as jest.Mock).mockReturnValue({
+      artifact: { apiPolicies: [], operations: [] },
+      loading: false,
+      error: undefined,
+      refresh: jest.fn(),
+    });
+
+    renderComponent();
+    expect(screen.getByTestId('policy-editor')).toBeInTheDocument();
   });
 });

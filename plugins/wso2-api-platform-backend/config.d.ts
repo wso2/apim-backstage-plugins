@@ -87,33 +87,90 @@ export interface Config {
          */
         backend?: 'database' | 's3' | 'filesystem';
       };
+      definitions?: {
+        /**
+         * Maximum size, in kilobytes, for an uploaded API definition.
+         * Defaults to 1024.
+         * @visibility frontend
+         */
+        maxSizeKb?: number;
+      };
+      policies?: {
+        /**
+         * Maximum size, in kilobytes, for a policy artifact payload.
+         * Defaults to 256.
+         * @visibility frontend
+         */
+        maxSizeKb?: number;
+      };
+    };
+    /** API Portal settings. */
+    apiPortal?: {
+      /** Defaults to false. @visibility frontend */
+      enabled?: boolean;
+      /** API Portal URL. @visibility frontend */
+      baseUrl?: string;
+      /** Defaults to '/api-portal/api/v0.9'. */
+      basePath?: string;
+      auth?: {
+        /** Defaults to 'platform-login'. */
+        mode?: 'platform-login' | 'idp';
+      };
+      defaults?: {
+        /** API status. */
+        status?: 'PUBLISHED' | 'DEPRECATED';
+        /** Existing org labels. */
+        labels?: string[];
+        /** Existing org subscription plans. */
+        subscriptionPlans?: string[];
+        /** Agent visibility. */
+        agentVisibility?: 'VISIBLE' | 'HIDDEN';
+      };
+      /** Request timeout in seconds. */
+      requestTimeoutSeconds?: number;
+      tls?: {
+        rejectUnauthorized?: boolean;
+      };
     };
   };
   /**
-   * Configuration for self-hosted WSO2 API Platform Gateways.
+   * Configuration for the WSO2 API Platform Gateways.
    * @visibility frontend
    */
   wso2ApiPlatformGateway?: {
     /**
-     * Enables WSO2 API Platform Gateway discovery.
-     * Defaults to false.
+     * Enables WSO2 API Platform Gateway integration. Defaults to false.
      * @visibility frontend
      */
     enabled?: boolean;
+    /**
+     * Master switch for pushing Definition/Policy edits to the gateway.
+     * Defaults to false.
+     *
+     * IGNORED for this release: this feature is hard-locked to `false` in
+     * code (`GATEWAY_WRITE_OPERATIONS_LOCKED` in the backend's
+     * `service/config.ts`, mirrored in the frontend's
+     * `utils/gatewayWriteAccess.ts`), because it has no per-API/per-team
+     * authorization model yet — enabling it would let any authenticated
+     * Backstage user with valid gateway credentials change any API on the
+     * gateway. Setting this to `true` here currently has no effect. It is
+     * expected to be re-enabled, with that authorization gap addressed, in
+     * a future release.
+     * @visibility frontend
+     */
+    enableWriteOperations?: boolean;
     gateways?: Array<{
       name: string;
-      urls: string[];
+      runtimeUrls: string[];
       /** @visibility frontend */
-      discoveryUrl?: string;
+      managementApiUrl?: string;
       /** @visibility secret */
-      discoveryUsername?: string;
+      managementApiUsername?: string;
       /** @visibility secret */
-      discoveryPassword?: string;
+      managementApiPassword?: string;
       environmentType?: string;
       description?: string;
       organizationId?: string;
-      /** @visibility frontend */
-      integration?: 'self-hosted' | 'openchoreo';
     }>;
   };
 }

@@ -30,6 +30,19 @@ The frontend plugin fetches data dynamically from this backend plugin. The follo
 | **PUT**     | `/api/wso2-api-platform/entities/:kind/:namespace/:name/documents/:documentId`         | `wso2Api.updateDocumentMetadata(...)` | Edits document metadata only.                                                                              |
 | **DELETE**  | `/api/wso2-api-platform/entities/:kind/:namespace/:name/documents/:documentId`         | `wso2Api.deleteDocument(...)`         | Hard-deletes a document.                                                                                   |
 | **GET**     | `/api/wso2-api-platform/entities/:kind/:namespace/:name/documents/:documentId/content` | `wso2Api.getDocumentContentUrl(...)`  | Streams/redirects to document content.                                                                     |
+| **GET**     | `/api/wso2-api-platform/entities/:kind/:namespace/:name/api-portal`                    | _(frontend, planned)_                 | API Portal publish capability check. OpenChoreo only.                                                      |
+| **POST**    | `/api/wso2-api-platform/entities/:kind/:namespace/:name/api-portal/preview`            | _(frontend, planned)_                 | Builds the metadata payload and document publish/skip plan without calling the API Portal.                 |
+| **POST**    | `/api/wso2-api-platform/entities/:kind/:namespace/:name/api-portal/publish`            | _(frontend, planned)_                 | Publishes the API's metadata, definition, and markdown documents to the API Portal.                        |
+
+## Gateway Write Operations Lock
+
+`wso2ApiPlatformGateway.enableWriteOperations` (default `false`) controls whether Definition and Policy edits are pushed directly to the gateway ("Full Sync Mode"), as opposed to being staged only in this plugin's own storage while an external process (e.g. an OpenChoreo workflow) reconciles the gateway separately ("OpenChoreo / External Flow Mode"). See the [top-level README](../../README.md#gateway-write-operations-mode) for the full behavior table.
+
+**For this initial release, Full Sync Mode is hard-locked to disabled in code — the config value is ignored entirely.** `GATEWAY_WRITE_OPERATIONS_LOCKED` in [`src/service/config.ts`](./src/service/config.ts) forces the resolved value to `false` no matter what `enableWriteOperations` is set to in any config layer (app-config.yaml, an env var override, a production overlay, etc). The frontend plugin enforces an identical, independent lock (`GATEWAY_WRITE_OPERATIONS_LOCKED` in `wso2-api-platform`'s `src/utils/gatewayWriteAccess.ts`), so this isn't bypassable from the UI either.
+
+**Why:** Full Sync Mode has no per-API or per-team authorization model yet. Every write route (`definitionRoutes.ts`, `policyRoutes.ts`) is gated only on "is this an authenticated Backstage user" — there is no check that the caller is actually allowed to modify this specific API's gateway. Enabling it today would let **any** authenticated Backstage user who holds valid gateway credentials modify **any** API on the gateway, not just ones they own or manage. That gap must be closed before this lock is removed.
+
+**Re-enabling in a future release:** add the missing per-API/per-team authorization checks, then set `GATEWAY_WRITE_OPERATIONS_LOCKED` back to `false` in both this plugin and the frontend plugin so the `enableWriteOperations` config value takes effect again.
 
 ## Document storage
 
@@ -39,6 +52,12 @@ therefore owns a small relational store for their documents (create, view,
 edit metadata, hard delete). On-prem APIM documents are unaffected: they
 remain read-only, served from the catalog's `wso2.com/api-documents`
 annotation and the legacy content-proxy route above.
+
+**Markdown only for gateway-discovered APIs.** Self-hosted-gateway and
+OpenChoreo document attachments accept `sourceType: MARKDOWN` only — the
+WSO2 API Portal ingests markdown documents, so this is enforced in code
+(`GATEWAY_DOCUMENT_SOURCE_TYPES` in `documents/types.ts`), not a config
+option. On-prem APIM document types are unaffected by this restriction.
 
 ### Enabling and configuring
 
@@ -125,6 +144,60 @@ operational surprise when adopting this feature.
   `RestApi` CRD redeploys has not been empirically verified. If it turns out
   to be unstable, a redeploy could orphan a gateway API's documents (they are
   not deleted, just unreachable under the new id).
+
+## API Portal publishing (OpenChoreo APIs)
+
+OpenChoreo-discovered APIs can be published — metadata, definition, and
+markdown documents — to a production WSO2 API Portal instance
+(`/api-portal/api/v0.9`). There is no publish flow for self-hosted-gateway or
+on-prem APIM APIs; self-hosted-gateway APIs do share the same markdown-only
+document restriction, though (see "Document storage" above).
+
+### Enabling and configuring
+
+```yaml
+wso2ApiPlatform:
+  apiPortal:
+    enabled: true
+    baseUrl: ${WSO2_API_PORTAL_BASE_URL} # defaults to the production API Portal if omitted
+    basePath: /api-portal/api/v0.9
+    auth:
+      mode: platform-login # see "Authentication" below; 'idp' is not implemented yet
+    defaults:
+      status: PUBLISHED
+      agentVisibility: VISIBLE
+      labels: [default] # must already exist in the org
+      subscriptionPlans: [] # must already exist in the org
+    requestTimeoutSeconds: 30
+    tls:
+      rejectUnauthorized: true
+```
+
+Policies are never sent — the portal's metadata schema has no policy field,
+and platform-api's own portal-publish flow does not send them either.
+
+### Authentication
+
+The API Portal's own API supports two ways to authenticate: a Platform API
+login, or an IdP-issued token. Only the Platform API login is implemented:
+
+- **`platform-login`** (default): the backend holds no API Portal
+  credentials of its own. The frontend logs into the Platform API on the
+  user's behalf and forwards the resulting access token on every publish
+  call, via the `x-api-portal-access-token` request header. The backend
+  simply relays that token as the Bearer token to the API Portal — nothing
+  is cached or persisted.
+- **`idp`**: not implemented yet. Setting this mode while `enabled: true`
+  fails at startup with a clear error; it's reserved for a future IdP-backed
+  auth flow.
+
+`POST .../api-portal/publish` returns `503` if the API Portal isn't
+reachable (checked before any publish request is sent), and `401` if the
+`x-api-portal-access-token` header is missing.
+
+**Pre-existing org entities.** Any `labels` and `subscriptionPlans` sent must
+already exist in the org — the portal links by name, it does not create
+them.
 
 ## License
 

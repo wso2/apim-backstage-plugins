@@ -19,6 +19,7 @@
 import { discoverWSO2PlatformGatewayApis } from './gatewayUtils';
 import { Wso2Client } from '../../client';
 import { PlatformGateway } from './types';
+import { gatewayStatusTracker } from '../../gatewayStatusTracker';
 
 jest.mock('../../client');
 
@@ -29,6 +30,7 @@ describe('gateway/gatewayUtils', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    gatewayStatusTracker.reset();
     mockGetGatewayApis = jest.fn();
     mockGetGatewayApiDetail = jest.fn();
 
@@ -39,12 +41,12 @@ describe('gateway/gatewayUtils', () => {
     mockClient = new Wso2Client({} as any);
   });
 
-  it('should skip discovery if no gateway has discoveryUrl configured', async () => {
+  it('should skip discovery if no gateway has managementApiUrl configured', async () => {
     const gateways: PlatformGateway[] = [
       {
         environmentName: 'gw-1',
         environmentType: 'PROD',
-        urls: ['https://gw1.com'],
+        runtimeUrls: ['https://gw1.com'],
       },
     ];
 
@@ -58,9 +60,9 @@ describe('gateway/gatewayUtils', () => {
       {
         environmentName: 'MySelfHostedGate',
         environmentType: 'PRODUCTION',
-        urls: ['https://gateway.com'],
-        discoveryUrl: 'https://discovery-service.com/apis',
-        discoveryAuth: 'Basic abc-auth',
+        runtimeUrls: ['https://gateway.com'],
+        managementApiUrl: 'https://discovery-service.com/apis',
+        managementApiAuth: 'Basic abc-auth',
       },
     ];
 
@@ -121,6 +123,9 @@ describe('gateway/gatewayUtils', () => {
       'https://discovery-service.com/apis',
       'Basic abc-auth',
     );
+    expect(gatewayStatusTracker.getStatus('MySelfHostedGate').active).toBe(
+      true,
+    );
   });
 
   it('should discover APIs from gateway-controller 1.2.x raw RestApi responses', async () => {
@@ -128,13 +133,12 @@ describe('gateway/gatewayUtils', () => {
       {
         environmentName: 'oc-poc-gateway',
         environmentType: 'PRODUCTION',
-        urls: ['https://gateway.com'],
-        discoveryUrl: 'https://controller.com/rest-apis',
-        discoveryAuth: 'Basic abc-auth',
+        runtimeUrls: ['https://gateway.com'],
+        managementApiUrl: 'https://controller.com/rest-apis',
+        managementApiAuth: 'Basic abc-auth',
       },
     ];
 
-    // 1.2.x list items are raw RestApi resources without a top-level id
     const rawRestApi = {
       apiVersion: 'gateway.api-platform.wso2.com/v1alpha1',
       kind: 'RestApi',
@@ -142,7 +146,7 @@ describe('gateway/gatewayUtils', () => {
       spec: {
         displayName: 'Orders API',
         version: 'v1.0',
-        context: '/orders-api-dev-55b5a86f',
+        context: '/orders-api-dev-55b5a86f/$version',
         policies: [{ name: 'cors', version: 'v1' }],
         operations: [{ method: 'GET', path: '/orders' }],
       },
@@ -150,8 +154,6 @@ describe('gateway/gatewayUtils', () => {
     };
 
     mockGetGatewayApis.mockResolvedValueOnce({ items: [rawRestApi] });
-    // 1.2.x detail responses are also raw resources, without the
-    // {status: 'success', api} wrapper
     mockGetGatewayApiDetail.mockResolvedValueOnce(rawRestApi);
 
     const result = await discoverWSO2PlatformGatewayApis(gateways, mockClient);
@@ -167,7 +169,7 @@ describe('gateway/gatewayUtils', () => {
         id: '019ff545-0000-0000-0000-000000000000',
         name: 'Orders API',
         version: 'v1.0',
-        context: '/orders-api-dev-55b5a86f',
+        context: '/orders-api-dev-55b5a86f/v1.0',
         lifeCycleStatus: 'Deployed',
         initiatedFromGateway: true,
         isDirectDiscovery: true,
@@ -182,9 +184,9 @@ describe('gateway/gatewayUtils', () => {
       {
         environmentName: 'MySelfHostedGate',
         environmentType: 'PRODUCTION',
-        urls: ['https://gateway.com'],
-        discoveryUrl: 'https://discovery-service.com/apis',
-        discoveryAuth: 'Basic abc-auth',
+        runtimeUrls: ['https://gateway.com'],
+        managementApiUrl: 'https://discovery-service.com/apis',
+        managementApiAuth: 'Basic abc-auth',
       },
     ];
 
@@ -202,8 +204,8 @@ describe('gateway/gatewayUtils', () => {
       {
         environmentName: 'MySelfHostedGate',
         environmentType: 'PRODUCTION',
-        urls: ['https://gateway.com'],
-        discoveryUrl: 'https://discovery-service.com/apis',
+        runtimeUrls: ['https://gateway.com'],
+        managementApiUrl: 'https://discovery-service.com/apis',
       },
     ];
 
@@ -213,5 +215,8 @@ describe('gateway/gatewayUtils', () => {
 
     const result = await discoverWSO2PlatformGatewayApis(gateways, mockClient);
     expect(result).toEqual([]);
+    const status = gatewayStatusTracker.getStatus('MySelfHostedGate');
+    expect(status.active).toBe(false);
+    expect(status.lastError).toBe('Discovery service offline');
   });
 });

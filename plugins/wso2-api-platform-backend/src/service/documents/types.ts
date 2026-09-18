@@ -18,12 +18,8 @@
 
 import type { ReadableStream as WebReadableStream } from 'stream/web';
 
-/**
- * Which underlying store owns an API's documents. `apim` is the existing
- * on-prem Publisher-backed, read-only path; `self-hosted` and `openchoreo`
- * are backed by this plugin's own database.
- */
-export type ApiSourceKind = 'self-hosted' | 'openchoreo' | 'apim';
+/** Identifies the document store for an API. */
+export type ApiSourceKind = 'gateway' | 'apim';
 
 export type ApiDocumentType =
   | 'HOWTO'
@@ -34,6 +30,10 @@ export type ApiDocumentType =
   | 'OTHER';
 
 export type ApiDocumentSourceType = 'INLINE' | 'MARKDOWN' | 'URL' | 'FILE';
+
+export const GATEWAY_DOCUMENT_SOURCE_TYPES: ApiDocumentSourceType[] = [
+  'MARKDOWN',
+];
 
 /**
  * Logical identity of an API, independent of its catalog entity name (which
@@ -77,6 +77,7 @@ export type ApiDocumentCapabilities = {
   updateMetadata: boolean;
   updateContent: boolean;
   delete: boolean;
+  allowedSourceTypes?: ApiDocumentSourceType[];
 };
 
 export type ApiDocumentListResult = {
@@ -123,3 +124,29 @@ export type DocumentContentResult =
       fileName?: string;
     }
   | { kind: 'redirect'; url: string };
+
+export type ApiDefinitionFormat = 'YAML' | 'JSON';
+
+export type ApiDefinition = {
+  content: string;
+  format: ApiDefinitionFormat;
+  description?: string;
+  fileName?: string;
+  sizeBytes?: number;
+  createdBy?: string;
+  createdTime?: string;
+  lastUpdatedBy?: string;
+  lastUpdatedTime?: string;
+};
+
+export type ApiDefinitionCapabilities = {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+};
+
+export type UpsertDefinitionInput = {
+  fileName: string;
+  content: string;
+  description?: string;
+};
