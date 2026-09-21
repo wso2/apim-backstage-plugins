@@ -24,8 +24,10 @@ import {
   preparePublish,
   publishApiToPortal,
 } from '../apiPortal/publishService';
+import { actorFor } from './artifactRouteHelpers';
 import { RouteContext } from './types';
 import {
+  DEFAULT_SUBSCRIPTION_PLAN_IDS,
   PortalApiPublishOverrides,
   PublishCapabilities,
 } from '../apiPortal/types';
@@ -33,6 +35,7 @@ import {
 const API_PORTAL_PATH = '/entities/:kind/:namespace/:name/api-portal';
 const PREVIEW_PATH = `${API_PORTAL_PATH}/preview`;
 const PUBLISH_PATH = `${API_PORTAL_PATH}/publish`;
+const SUBSCRIPTIONS_PATH = `${API_PORTAL_PATH}/subscriptions`;
 
 const PORTAL_TOKEN_HEADER = 'x-api-portal-access-token';
 
@@ -58,6 +61,12 @@ function requirePublishOverrides(
       : '';
   const sandboxEndpoint =
     typeof body.sandboxEndpoint === 'string' ? body.sandboxEndpoint.trim() : '';
+  const labels = Array.isArray(body.labels)
+    ? body.labels
+        .filter((label: unknown): label is string => typeof label === 'string')
+        .map((label: string) => label.trim())
+        .filter(Boolean)
+    : [];
 
   if (!displayName) {
     throw new InputError(
@@ -69,12 +78,48 @@ function requirePublishOverrides(
       'productionEndpoint is required to publish to the API Portal',
     );
   }
+  if (labels.length === 0) {
+    throw new InputError(
+      'At least one label is required to publish to the API Portal',
+    );
+  }
 
   return {
     displayName,
     productionEndpoint,
+    labels,
     ...(sandboxEndpoint ? { sandboxEndpoint } : {}),
   };
+}
+
+function availableCustomPlanIds(config: {
+  defaults: { subscriptionPlans: string[] };
+}): string[] {
+  return config.defaults.subscriptionPlans.filter(
+    id => !DEFAULT_SUBSCRIPTION_PLAN_IDS.includes(id),
+  );
+}
+
+function requireValidPlanIds(
+  req: express.Request,
+  config: { defaults: { subscriptionPlans: string[] } },
+): string[] {
+  const body = req.body ?? {};
+  const planIds = body.planIds;
+  if (!Array.isArray(planIds) || !planIds.every(id => typeof id === 'string')) {
+    throw new InputError('planIds must be an array of strings');
+  }
+  const allowed = new Set([
+    ...DEFAULT_SUBSCRIPTION_PLAN_IDS,
+    ...availableCustomPlanIds(config),
+  ]);
+  const unknown = planIds.filter(id => !allowed.has(id));
+  if (unknown.length > 0) {
+    throw new InputError(
+      `Unknown subscription plan id(s): ${unknown.join(', ')}`,
+    );
+  }
+  return planIds;
 }
 
 export function registerApiPortalRoutes(
@@ -87,7 +132,8 @@ export function registerApiPortalRoutes(
     !context.apiPortalConfig ||
     !context.apiPortalClient ||
     !context.apiPortalDefinitionStore ||
-    !context.apiPortalDocumentStore
+    !context.apiPortalDocumentStore ||
+    !context.apiPortalSubscriptionStore
   ) {
     return;
   }
@@ -100,6 +146,7 @@ export function registerApiPortalRoutes(
     apiPortalClient: portalClient,
     apiPortalDefinitionStore: definitionStore,
     apiPortalDocumentStore: documentStore,
+    apiPortalSubscriptionStore: subscriptionStore,
   } = context as Required<RouteContext>;
 
   async function resolve(req: express.Request) {
@@ -113,7 +160,7 @@ export function registerApiPortalRoutes(
     const entity = await catalog.getEntityByRef(apiRef.entityRef, {
       credentials,
     });
-    return { apiRef, entity: entity! };
+    return { apiRef, entity: entity!, credentials };
   }
 
   async function computeCapabilities(
@@ -156,8 +203,35 @@ export function registerApiPortalRoutes(
     });
   });
 
+  router.get(SUBSCRIPTIONS_PATH, async (req, res) => {
+    const { apiRef } = await resolve(req);
+    const { planIds } = await subscriptionStore.get(apiRef);
+    res.json({
+      availableCustomPlanIds: availableCustomPlanIds(config),
+      selectedPlanIds: planIds,
+    });
+  });
+
+  router.put(SUBSCRIPTIONS_PATH, async (req, res) => {
+    const planIds = requireValidPlanIds(req, config);
+    const { apiRef, credentials } = await resolve(req);
+
+    const selection = await subscriptionStore.set(
+      apiRef,
+      planIds,
+      actorFor(credentials),
+    );
+    res.json({
+      availableCustomPlanIds: availableCustomPlanIds(config),
+      selectedPlanIds: selection.planIds,
+    });
+  });
+
   router.post(PREVIEW_PATH, async (req, res) => {
     const { apiRef, entity } = await resolve(req);
+    const { planIds: subscriptionPlanIds } = await subscriptionStore.get(
+      apiRef,
+    );
     const prepared = await preparePublish({
       apiRef,
       entity,
@@ -166,6 +240,7 @@ export function registerApiPortalRoutes(
       documentStore,
       config,
       logger,
+      subscriptionPlanIds,
     });
     res.json({
       metadata: prepared.metadata,
@@ -182,6 +257,10 @@ export function registerApiPortalRoutes(
     const { apiRef, entity } = await resolve(req);
     await portalClient.checkAccessible();
 
+    const { planIds: subscriptionPlanIds } = await subscriptionStore.get(
+      apiRef,
+    );
+
     const result = await publishApiToPortal({
       apiRef,
       entity,
@@ -193,6 +272,7 @@ export function registerApiPortalRoutes(
       config,
       logger,
       overrides,
+      subscriptionPlanIds,
     });
     res.json(result);
   });

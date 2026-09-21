@@ -21,7 +21,14 @@ import { LoggerService } from '@backstage/backend-plugin-api';
 import { Agent, fetch as undiciFetch, Response } from 'undici';
 import { joinUrl } from '../urlUtils';
 import { ApiPortalConfig } from './config';
-import { PortalApiForm, PortalApiMetadataResponse } from './types';
+import {
+  PortalApiForm,
+  PortalApiMetadataResponse,
+  PortalLabel,
+  PortalLabelsResponse,
+  PortalSubscriptionPlan,
+  PortalSubscriptionPlansResponse,
+} from './types';
 
 const MARKDOWN_DOCUMENT_CONTENT_TYPE = 'DOC_Other';
 
@@ -121,6 +128,26 @@ export class ApiPortalClient {
     });
     await this.assertOk(response, 'update API metadata in the API Portal');
     return (await response.json()) as PortalApiMetadataResponse;
+  }
+
+  async getSubscriptionPlans(token: string): Promise<PortalSubscriptionPlan[]> {
+    const response = await this.request('/subscription-plans', {
+      method: 'GET',
+      token,
+    });
+    await this.assertOk(
+      response,
+      'fetch subscription plans from the API Portal',
+    );
+    const body = (await response.json()) as PortalSubscriptionPlansResponse;
+    return body.list;
+  }
+
+  async getLabels(token: string): Promise<PortalLabel[]> {
+    const response = await this.request('/labels', { method: 'GET', token });
+    await this.assertOk(response, 'fetch labels from the API Portal');
+    const body = (await response.json()) as PortalLabelsResponse;
+    return body.list;
   }
 
   async uploadAssets(

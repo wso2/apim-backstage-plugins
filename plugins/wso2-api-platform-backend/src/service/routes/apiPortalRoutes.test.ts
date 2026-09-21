@@ -162,7 +162,6 @@ describe('api-portal routes', () => {
         apiPortal: {
           enabled: true,
           baseUrl: PORTAL_BASE_URL,
-          defaults: { labels: ['default'] },
           ...apiPortalOverrides,
         },
       },
@@ -199,6 +198,41 @@ describe('api-portal routes', () => {
 
   const PAYMENT_API_PATH = '/entities/api/wso2-gateways/payment-api/api-portal';
   const SELF_HOSTED_PATH = '/entities/api/wso2-gateways/orders-api/api-portal';
+
+  async function seedDefinition() {
+    mockClientInstance.getConfig.mockReturnValue(PAYMENT_API_GATEWAY_CONFIG);
+    mockClientInstance.getGatewayApiDetail.mockResolvedValue(
+      DISCOVERED_RESTAPI_CR,
+    );
+    await request(app)
+      .put('/entities/api/wso2-gateways/payment-api/definition')
+      .send({
+        fileName: 'openapi.yaml',
+        content: MATCHING_OPENCHOREO_DEFINITION,
+      });
+  }
+
+  function mockPortalReachableAndPublishable() {
+    mockFetch.mockImplementation(async (url: any) => {
+      if (url === PORTAL_ROOT_URL) {
+        return jsonResponse(200, {});
+      }
+      if (url === `${PORTAL_ROOT_URL}/labels`) {
+        return jsonResponse(200, {
+          list: [{ id: 'default' }],
+          count: 1,
+          pagination: { total: 1, limit: 100, offset: 0 },
+        });
+      }
+      if (url === GET_API_URL) {
+        return jsonResponse(404, {});
+      }
+      if (url === CREATE_API_URL) {
+        return jsonResponse(201, { id: 'payment-api-service-v1.0' });
+      }
+      throw new Error(`Unexpected fetch to ${url}`);
+    });
+  }
 
   describe('GET .../api-portal — capability reasons', () => {
     it('reaches the same next-stage check for a self-hosted-origin gateway API as for an OpenChoreo-origin one — no dedicated OpenChoreo-only gate any more', async () => {
@@ -273,35 +307,8 @@ describe('api-portal routes', () => {
     const PUBLISH_OVERRIDES = {
       displayName: 'Payment API (Portal)',
       productionEndpoint: 'https://gw.example.com/payments',
+      labels: ['default'],
     };
-
-    async function seedDefinition() {
-      mockClientInstance.getConfig.mockReturnValue(PAYMENT_API_GATEWAY_CONFIG);
-      mockClientInstance.getGatewayApiDetail.mockResolvedValue(
-        DISCOVERED_RESTAPI_CR,
-      );
-      await request(app)
-        .put('/entities/api/wso2-gateways/payment-api/definition')
-        .send({
-          fileName: 'openapi.yaml',
-          content: MATCHING_OPENCHOREO_DEFINITION,
-        });
-    }
-
-    function mockPortalReachableAndPublishable() {
-      mockFetch.mockImplementation(async (url: any) => {
-        if (url === PORTAL_ROOT_URL) {
-          return jsonResponse(200, {});
-        }
-        if (url === GET_API_URL) {
-          return jsonResponse(404, {});
-        }
-        if (url === CREATE_API_URL) {
-          return jsonResponse(201, { id: 'payment-api-service-v1.0' });
-        }
-        throw new Error(`Unexpected fetch to ${url}`);
-      });
-    }
 
     it('forwards the frontend-supplied token as the portal Bearer token', async () => {
       await buildApp();
@@ -380,6 +387,24 @@ describe('api-portal routes', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it('rejects with 400 when no labels are provided', async () => {
+      await buildApp();
+      await seedDefinition();
+      mockPortalReachableAndPublishable();
+
+      const res = await request(app)
+        .post(`${PAYMENT_API_PATH}/publish`)
+        .set(PORTAL_TOKEN_HEADER, 'user-supplied-token')
+        .send({
+          displayName: PUBLISH_OVERRIDES.displayName,
+          productionEndpoint: PUBLISH_OVERRIDES.productionEndpoint,
+          labels: [],
+        });
+
+      expect(res.status).toBe(400);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('rejects with 401 when the portal-token header is missing', async () => {
       await buildApp();
       await seedDefinition();
@@ -409,6 +434,69 @@ describe('api-portal routes', () => {
         .send(PUBLISH_OVERRIDES);
 
       expect(res.status).toBe(503);
+      expect(mockFetch.mock.calls.some(([url]) => url === CREATE_API_URL)).toBe(
+        false,
+      );
+    });
+
+    it('rejects with 400 naming the invalid plan when a selected subscription plan does not exist in the org, instead of a raw 404 from the portal', async () => {
+      await buildApp();
+      await seedDefinition();
+      await request(app)
+        .put(`${PAYMENT_API_PATH}/subscriptions`)
+        .send({ planIds: ['Bronze'] });
+
+      mockFetch.mockImplementation(async (url: any) => {
+        if (url === PORTAL_ROOT_URL) {
+          return jsonResponse(200, {});
+        }
+        if (url === `${PORTAL_ROOT_URL}/subscription-plans`) {
+          return jsonResponse(200, {
+            list: [{ id: 'Gold' }],
+            count: 1,
+            pagination: { total: 1, limit: 100, offset: 0 },
+          });
+        }
+        throw new Error(`Unexpected fetch to ${url}`);
+      });
+
+      const res = await request(app)
+        .post(`${PAYMENT_API_PATH}/publish`)
+        .set(PORTAL_TOKEN_HEADER, 'user-supplied-token')
+        .send(PUBLISH_OVERRIDES);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/Bronze/);
+      expect(mockFetch.mock.calls.some(([url]) => url === CREATE_API_URL)).toBe(
+        false,
+      );
+    });
+
+    it('rejects with 400 naming the invalid label when a label does not exist in the org, instead of a raw 404 from the portal', async () => {
+      await buildApp();
+      await seedDefinition();
+
+      mockFetch.mockImplementation(async (url: any) => {
+        if (url === PORTAL_ROOT_URL) {
+          return jsonResponse(200, {});
+        }
+        if (url === `${PORTAL_ROOT_URL}/labels`) {
+          return jsonResponse(200, {
+            list: [{ id: 'premium' }],
+            count: 1,
+            pagination: { total: 1, limit: 100, offset: 0 },
+          });
+        }
+        throw new Error(`Unexpected fetch to ${url}`);
+      });
+
+      const res = await request(app)
+        .post(`${PAYMENT_API_PATH}/publish`)
+        .set(PORTAL_TOKEN_HEADER, 'user-supplied-token')
+        .send(PUBLISH_OVERRIDES);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/default/);
       expect(mockFetch.mock.calls.some(([url]) => url === CREATE_API_URL)).toBe(
         false,
       );
@@ -451,6 +539,64 @@ describe('api-portal routes', () => {
         .post(`${SELF_HOSTED_PATH}/preview`)
         .send({});
       expect(res.status).toBe(409);
+    });
+
+    it("reflects the API's persisted subscription plan selection, not the org-wide config list", async () => {
+      await buildApp({
+        defaults: { subscriptionPlans: ['Gold'] },
+      });
+      await seedDefinition();
+      await request(app)
+        .put(`${PAYMENT_API_PATH}/subscriptions`)
+        .send({ planIds: ['Bronze'] });
+
+      const res = await request(app)
+        .post(`${PAYMENT_API_PATH}/preview`)
+        .send({});
+
+      expect(res.body.metadata.subscriptionPlans).toEqual([{ id: 'Bronze' }]);
+    });
+  });
+
+  describe('GET/PUT .../api-portal/subscriptions', () => {
+    const SUBSCRIPTIONS_PATH = `${PAYMENT_API_PATH}/subscriptions`;
+
+    it('reports no selection and the custom plan ids from config (minus the four defaults) initially', async () => {
+      await buildApp({
+        defaults: {
+          subscriptionPlans: ['Gold', 'Custom-Plan', 'Silver'],
+        },
+      });
+
+      const res = await request(app).get(SUBSCRIPTIONS_PATH);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        availableCustomPlanIds: ['Custom-Plan'],
+        selectedPlanIds: [],
+      });
+    });
+
+    it('persists a selection and returns it on a subsequent GET', async () => {
+      await buildApp();
+
+      const putRes = await request(app)
+        .put(SUBSCRIPTIONS_PATH)
+        .send({ planIds: ['Bronze', 'Gold'] });
+      expect(putRes.status).toBe(200);
+      expect(putRes.body.selectedPlanIds).toEqual(['Bronze', 'Gold']);
+
+      const getRes = await request(app).get(SUBSCRIPTIONS_PATH);
+      expect(getRes.body.selectedPlanIds).toEqual(['Bronze', 'Gold']);
+    });
+
+    it('rejects with 400 for a plan id that is neither a default nor a configured custom plan', async () => {
+      await buildApp();
+
+      const res = await request(app)
+        .put(SUBSCRIPTIONS_PATH)
+        .send({ planIds: ['NotAPlan'] });
+
+      expect(res.status).toBe(400);
     });
   });
 });

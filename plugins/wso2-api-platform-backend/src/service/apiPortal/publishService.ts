@@ -17,7 +17,7 @@
  */
 
 import { Entity } from '@backstage/catalog-model';
-import { ConflictError, NotAllowedError } from '@backstage/errors';
+import { ConflictError, InputError, NotAllowedError } from '@backstage/errors';
 import { LoggerService } from '@backstage/backend-plugin-api';
 import JSZip from 'jszip';
 import { Wso2ApiPlatformClient } from '../client';
@@ -72,9 +72,17 @@ export function buildPortalMetadata(input: {
   apiRef: Pick<ApiRef, 'apiId'>;
   config: ApiPortalConfig;
   overrides?: PortalApiPublishOverrides;
+  subscriptionPlanIds?: string[];
 }): PortalApiMetadataPayload {
-  const { artifact, entity, definitionContent, apiRef, config, overrides } =
-    input;
+  const {
+    artifact,
+    entity,
+    definitionContent,
+    apiRef,
+    config,
+    overrides,
+    subscriptionPlanIds,
+  } = input;
 
   const { description: definitionDescription } =
     parseDefinitionInfo(definitionContent);
@@ -103,10 +111,10 @@ export function buildPortalMetadata(input: {
     status: config.defaults.status,
     referenceId: apiRef.apiId,
     tags: nonGatewayTags(entity),
-    labels: config.defaults.labels,
+    labels: overrides?.labels ?? [],
     ...(technicalOwner ? { owners: { technicalOwner } } : {}),
     ...(endPoints ? { endPoints } : {}),
-    subscriptionPlans: config.defaults.subscriptionPlans.map(id => ({ id })),
+    subscriptionPlans: (subscriptionPlanIds ?? []).map(id => ({ id })),
     agentVisibility: config.defaults.agentVisibility,
   };
 }
@@ -205,6 +213,7 @@ export async function preparePublish(opts: {
   config: ApiPortalConfig;
   logger: LoggerService;
   overrides?: PortalApiPublishOverrides;
+  subscriptionPlanIds?: string[];
 }): Promise<PreparedPublish> {
   const {
     apiRef,
@@ -215,6 +224,7 @@ export async function preparePublish(opts: {
     config,
     logger,
     overrides,
+    subscriptionPlanIds,
   } = opts;
 
   if (apiRef.sourceKind !== 'gateway') {
@@ -241,6 +251,7 @@ export async function preparePublish(opts: {
     apiRef,
     config,
     overrides,
+    subscriptionPlanIds,
   });
 
   const allDocuments = await documentStore.list(apiRef);
@@ -278,6 +289,7 @@ export async function publishApiToPortal(opts: {
   config: ApiPortalConfig;
   logger: LoggerService;
   overrides?: PortalApiPublishOverrides;
+  subscriptionPlanIds?: string[];
 }): Promise<PublishResult> {
   const {
     apiRef,
@@ -289,6 +301,7 @@ export async function publishApiToPortal(opts: {
     config,
     logger,
     overrides,
+    subscriptionPlanIds,
   } = opts;
 
   const prepared = await preparePublish({
@@ -300,7 +313,36 @@ export async function publishApiToPortal(opts: {
     config,
     logger,
     overrides,
+    subscriptionPlanIds,
   });
+
+  if (subscriptionPlanIds && subscriptionPlanIds.length > 0) {
+    const orgPlans = await portalClient.getSubscriptionPlans(accessToken);
+    const availableIds = new Set(orgPlans.map(p => p.id));
+    const invalidIds = subscriptionPlanIds.filter(id => !availableIds.has(id));
+    if (invalidIds.length > 0) {
+      throw new InputError(
+        `Invalid subscription plan(s) selected for this API: ${invalidIds.join(
+          ', ',
+        )} — not available in this org's API Portal. Update the selection in the Overview tab's Subscription Plans panel and try again.`,
+      );
+    }
+  }
+
+  if (overrides?.labels && overrides.labels.length > 0) {
+    const orgLabels = await portalClient.getLabels(accessToken);
+    const availableLabelIds = new Set(orgLabels.map(l => l.id));
+    const invalidLabels = overrides.labels.filter(
+      id => !availableLabelIds.has(id),
+    );
+    if (invalidLabels.length > 0) {
+      throw new InputError(
+        `Invalid label(s): ${invalidLabels.join(
+          ', ',
+        )} — not available in this org's API Portal. Update the labels and try again.`,
+      );
+    }
+  }
 
   const existing = await portalClient.getApi(prepared.metadata.id, accessToken);
 

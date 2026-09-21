@@ -364,6 +364,14 @@ export type Wso2ApiPortalPublishOverrides = {
   displayName: string;
   productionEndpoint: string;
   sandboxEndpoint?: string;
+  labels: string[];
+};
+
+export type Wso2ApiPortalSubscriptionsResponse = {
+  /** Custom, org-provisioned plan IDs (beyond the four built-in defaults) available for selection. */
+  availableCustomPlanIds: string[];
+  /** This API's currently selected subscription plan IDs. */
+  selectedPlanIds: string[];
 };
 
 export interface Wso2ApiPlatformApi {
@@ -431,4 +439,11 @@ export interface Wso2ApiPlatformApi {
     accessToken: string,
     overrides: Wso2ApiPortalPublishOverrides,
   ): Promise<Wso2ApiPortalPublishResult>;
+  getApiPortalSubscriptions(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiPortalSubscriptionsResponse>;
+  updateApiPortalSubscriptions(
+    entityRef: CompoundEntityRef,
+    planIds: string[],
+  ): Promise<Wso2ApiPortalSubscriptionsResponse>;
 }
