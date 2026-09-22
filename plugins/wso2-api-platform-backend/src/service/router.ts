@@ -20,37 +20,72 @@ import express from 'express';
 import Router from 'express-promise-router';
 import {
   AuthService,
+  DatabaseService,
   HttpAuthService,
   LoggerService,
   RootConfigService,
+  SchedulerService,
 } from '@backstage/backend-plugin-api';
 import type { CatalogService } from '@backstage/plugin-catalog-node';
 
 import { Wso2ApiPlatformClient, readWso2ApiPlatformConfig } from './client';
+import { startGatewayStatusWatchdog } from './gatewayStatusWatchdog';
 import { registerApiRoutes } from './routes/apiRoutes';
 import { registerConfigRoutes } from './routes/configRoutes';
 import { registerStreamingRoutes } from './routes/streamingRoutes';
 import { registerGatewayRoutes } from './routes/gatewayRoutes';
+import { registerDocumentRoutes } from './routes/documentRoutes';
+import { registerDefinitionRoutes } from './routes/definitionRoutes';
+import { registerPolicyRoutes } from './routes/policyRoutes';
+import { registerApiPortalRoutes } from './routes/apiPortalRoutes';
 import { RouteContext } from './routes/types';
+import {
+  deriveJsonBodyLimitBytes,
+  readDefinitionStorageConfig,
+  readDocumentStorageConfig,
+  readPolicyStorageConfig,
+} from './documents/config';
+import { ArtifactDao } from './documents/dao/ArtifactDao';
+import { applyDatabaseMigrations } from './documents/dao/migrations';
+import { DatabaseBinaryStorage } from './documents/storage/DatabaseBinaryStorage';
+import { ApiDocumentStoreResolver } from './documents/stores/ApiDocumentStoreResolver';
+import { ApimPublisherDocumentStore } from './documents/stores/ApimPublisherDocumentStore';
+import { DatabaseApiDocumentStore } from './documents/stores/DatabaseApiDocumentStore';
+import { ApiDefinitionStoreResolver } from './documents/stores/ApiDefinitionStoreResolver';
+import { DatabaseApiDefinitionStore } from './documents/stores/DatabaseApiDefinitionStore';
+import { DatabaseApiSubscriptionPlanStore } from './documents/stores/DatabaseApiSubscriptionPlanStore';
+import { readApiPortalConfig } from './apiPortal/config';
+import { ApiPortalClient } from './apiPortal/ApiPortalClient';
+import { ServiceAccountTokenProvider } from './apiPortal/ServiceAccountTokenProvider';
 
 export interface RouterOptions {
   auth?: AuthService;
   catalog?: CatalogService;
+  database?: DatabaseService;
   logger: LoggerService;
   httpAuth: HttpAuthService;
   config: RootConfigService;
+  scheduler?: SchedulerService;
 }
 
 export async function createRouter(
   options: RouterOptions,
 ): Promise<express.Router> {
-  const { logger, httpAuth, config } = options;
+  const { logger, httpAuth, catalog, database, config, scheduler } = options;
   const wso2Config = readWso2ApiPlatformConfig(config);
   const client = new Wso2ApiPlatformClient({
     config: wso2Config,
     rawConfig: config,
     logger,
   });
+  const documentStorage = readDocumentStorageConfig(config);
+  const definitionStorage = readDefinitionStorageConfig(config);
+  const policyStorage = readPolicyStorageConfig(config);
+  const apiPortalConfig = readApiPortalConfig(config);
+
+  if (scheduler) {
+    startGatewayStatusWatchdog({ scheduler, config, client, logger });
+  }
 
   async function ensureAuthenticated(
     req: express.Request,
@@ -61,18 +96,101 @@ export async function createRouter(
   }
 
   const router = Router();
-  router.use(express.json({ limit: '10mb' }));
+  router.use(
+    express.json({ limit: deriveJsonBodyLimitBytes(documentStorage) }),
+  );
 
   const routeContext: RouteContext = {
     client,
     ensureAuthenticated,
     logger,
+    apiPortalConfig,
   };
 
   registerConfigRoutes(router, routeContext);
   registerApiRoutes(router, routeContext);
   registerStreamingRoutes(router, routeContext);
   registerGatewayRoutes(router, routeContext);
+
+  // Document storage is only wired up once both a database and a catalog
+  // client are available — both are optional on RouterOptions for backward
+  // compatibility with existing test doubles.
+  if (database && catalog) {
+    const knex = await database.getClient();
+    if (!database.migrations?.skip) {
+      await applyDatabaseMigrations(knex);
+    }
+
+    const dao = new ArtifactDao(knex, 'document');
+    const binaryStorage = new DatabaseBinaryStorage();
+    const databaseStore = new DatabaseApiDocumentStore(dao, binaryStorage);
+    const apimStore = new ApimPublisherDocumentStore(client);
+    const storeResolver = new ApiDocumentStoreResolver(
+      catalog,
+      databaseStore,
+      apimStore,
+    );
+
+    registerDocumentRoutes(router, {
+      ...routeContext,
+      storeResolver,
+      httpAuth,
+      catalog,
+      documentStorage,
+    });
+
+    const definitionDao = new ArtifactDao(knex, 'definition');
+    const definitionDatabaseStore = new DatabaseApiDefinitionStore(
+      definitionDao,
+    );
+    const definitionStoreResolver = new ApiDefinitionStoreResolver(
+      catalog,
+      definitionDatabaseStore,
+    );
+
+    registerDefinitionRoutes(router, {
+      ...routeContext,
+      definitionStoreResolver,
+      httpAuth,
+      catalog,
+      definitionStorage,
+    });
+
+    const subscriptionDao = new ArtifactDao(knex, 'subscription-plans');
+    const subscriptionStore = new DatabaseApiSubscriptionPlanStore(
+      subscriptionDao,
+    );
+
+    const apiPortalTokenProvider =
+      apiPortalConfig.auth.mode === 'idp' &&
+      apiPortalConfig.auth.idp?.strategy === 'service-account'
+        ? new ServiceAccountTokenProvider(apiPortalConfig, logger)
+        : undefined;
+
+    registerApiPortalRoutes(router, {
+      ...routeContext,
+      httpAuth,
+      catalog,
+      apiPortalClient: new ApiPortalClient(apiPortalConfig, logger),
+      apiPortalTokenProvider,
+      apiPortalDefinitionStore: definitionDatabaseStore,
+      apiPortalDocumentStore: databaseStore,
+      apiPortalSubscriptionStore: subscriptionStore,
+    });
+  } else {
+    logger.warn(
+      'WSO2 API Platform document/definition storage routes are disabled: database and/or catalog service not provided to createRouter',
+    );
+  }
+
+  if (catalog) {
+    registerPolicyRoutes(router, {
+      ...routeContext,
+      httpAuth,
+      catalog,
+      policyStorage,
+    });
+  }
 
   logger.info('WSO2 API Manager backend router initialized');
   return router;

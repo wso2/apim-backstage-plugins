@@ -294,6 +294,22 @@ export class Wso2ApiPlatformClient extends BaseWso2Client {
   }
 
   /**
+   * Lists document metadata for an API. Used by ApimPublisherDocumentStore
+   * (the read-only on-prem document store) — the existing frontend Docs tab
+   * for on-prem APIs instead reads the catalog's `wso2.com/api-documents`
+   * annotation and does not call this.
+   */
+  async getDocuments(
+    apiId: string,
+  ): Promise<{ count: number; list: Wso2ApiDocument[] }> {
+    const encodedApiId = encodeURIComponent(apiId);
+    return await this.requestPublisher<{
+      count: number;
+      list: Wso2ApiDocument[];
+    }>(`/apis/${encodedApiId}/documents`, {});
+  }
+
+  /**
    * Fetches document metadata for an API document.
    */
   async getDocument(
@@ -407,7 +423,10 @@ export class Wso2ApiPlatformClient extends BaseWso2Client {
   /**
    * Fetches gateway APIs from the discovery URL.
    */
-  async getGatewayApis(discoveryUrl: string, auth?: string): Promise<any[]> {
+  async getGatewayApis(
+    managementApiUrl: string,
+    auth?: string,
+  ): Promise<any[]> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
     };
@@ -416,11 +435,11 @@ export class Wso2ApiPlatformClient extends BaseWso2Client {
     }
 
     this.logger.info(
-      `[WSO2-GATEWAY-DISCOVERY] Attempting to fetch APIs from gateway discovery URL: ${discoveryUrl} (Auth present: ${!!auth})`,
+      `[WSO2-GATEWAY-DISCOVERY] Attempting to fetch APIs from gateway discovery URL: ${managementApiUrl} (Auth present: ${!!auth})`,
     );
 
     try {
-      const response = await undiciFetch(discoveryUrl, {
+      const response = await undiciFetch(managementApiUrl, {
         headers,
         dispatcher: this.dispatcher,
       });
@@ -428,10 +447,10 @@ export class Wso2ApiPlatformClient extends BaseWso2Client {
       if (!response.ok) {
         const errText = await response.text();
         this.logger.error(
-          `[WSO2-GATEWAY-DISCOVERY] Gateway Discovery failed for ${discoveryUrl}. Status: ${response.status}. Response: ${errText}`,
+          `[WSO2-GATEWAY-DISCOVERY] Gateway Discovery failed for ${managementApiUrl}. Status: ${response.status}. Response: ${errText}`,
         );
         throw new Error(
-          `Failed to fetch APIs from gateway ${discoveryUrl}, status ${response.status}`,
+          `Failed to fetch APIs from gateway ${managementApiUrl}, status ${response.status}`,
         );
       }
 
@@ -450,17 +469,69 @@ export class Wso2ApiPlatformClient extends BaseWso2Client {
       this.logger.debug(
         `[WSO2-GATEWAY-DISCOVERY] Found ${
           result.length
-        } APIs from gateway ${discoveryUrl}. Sample data: ${JSON.stringify(
+        } APIs from gateway ${managementApiUrl}. Sample data: ${JSON.stringify(
           result[0] || {},
         )}`,
       );
       return result;
     } catch (e: any) {
       this.logger.error(
-        `[WSO2-GATEWAY-DISCOVERY] Error fetching gateway APIs from ${discoveryUrl}: ${e.message}`,
+        `[WSO2-GATEWAY-DISCOVERY] Error fetching gateway APIs from ${managementApiUrl}: ${e.message}`,
       );
       throw e;
     }
+  }
+
+  /**
+   * Updates a gateway-managed API artifact.
+   */
+  async updateGatewayRestApi(
+    managementApiUrl: string,
+    apiId: string,
+    body: unknown,
+    auth?: string,
+  ): Promise<any> {
+    const url = `${managementApiUrl}/${encodeURIComponent(apiId)}`;
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
+    if (auth) {
+      headers.Authorization = auth;
+    }
+
+    this.logger.info(
+      `[WSO2-GATEWAY-UPDATE] Updating gateway API '${apiId}' at ${url}`,
+    );
+
+    const response = await undiciFetch(url, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body),
+      dispatcher: this.dispatcher,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => response.statusText);
+      let message = errText;
+      try {
+        const parsed = JSON.parse(errText);
+        const fieldErrors = Array.isArray(parsed?.errors)
+          ? parsed.errors.map((e: any) => `${e.field}: ${e.message}`).join('; ')
+          : '';
+        message = [parsed?.message, fieldErrors].filter(Boolean).join(' — ');
+      } catch {
+        // errText wasn't the gateway's JSON error envelope; use it verbatim.
+      }
+      this.logger.error(
+        `[WSO2-GATEWAY-UPDATE] Failed to update gateway API '${apiId}' at ${url}. Status: ${response.status}. ${message}`,
+      );
+      throw new Error(
+        `Gateway rejected the update for '${apiId}' (status ${response.status}): ${message}`,
+      );
+    }
+
+    return response.json();
   }
 
   /**

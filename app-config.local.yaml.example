@@ -42,8 +42,6 @@ catalog:
 wso2ApiPlatform:
   baseUrl: https://127.0.0.1:9443
   tls:
-    # Local/self-signed HTTPS certificates often are not trusted by Node.
-    # Use this only with local development config, not production.
     rejectUnauthorized: false
   publisherBasePath: /api/am/publisher/v4
   developerBasePath: /api/am/devportal/v3
@@ -53,13 +51,35 @@ wso2ApiPlatform:
     clientSecret: your_client_secret_here
     tokenUrl: https://127.0.0.1:9443/oauth2/token
 
-# Self-Hosted Gateway Discovery Configuration
+# wso2ApiPlatformApiPortal is its own top-level block, not nested under
+# wso2ApiPlatform — see plugins/wso2-api-platform-backend/README.md
+# "API Portal publishing" for the full auth.idp.strategy reference.
+wso2ApiPlatformApiPortal:
+  enabled: true
+  baseUrl: https://localhost:9543
+  tls:
+    rejectUnauthorized: false
+  auth:
+    mode: platform-login
+    # mode: idp
+    # idp:
+    #   strategy: service-account # | manual | reuse-signin
+    #   serviceAccount:
+    #     tokenUrl: https://idp.example.com/oauth2/token
+    #     clientId: your_m2m_client_id_here
+    #     clientSecret: your_m2m_client_secret_here
+    #     scope: 'dp:api:manage dp:api_content:manage dp:label:read dp:subscription_plan:read'
+    #   reuseSignIn:
+    #     providerId: oauth2
+    #     scopes: ['dp:api:manage', 'dp:api_content:manage']
+
+# Self-Hosted Gateway Configuration
 wso2ApiPlatformGateway:
   enabled: true
   gateways:
     - name: Self-Hosted-1
-      urls:
+      runtimeUrls:
         - http://development-default.openchoreoapis.localhost:8080
-      discoveryUrl: http://development-default.openchoreoapis.localhost:9090/rest-apis
-      discoveryUsername: admin
-      discoveryPassword: admin
+      managementApiUrl: http://development-default.openchoreoapis.localhost:9090/rest-apis
+      managementApiUsername: admin
+      managementApiPassword: admin

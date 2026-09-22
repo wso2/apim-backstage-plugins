@@ -19,6 +19,28 @@
 import { RootConfigService } from '@backstage/backend-plugin-api';
 import { Wso2ApiPlatformConfig } from './types';
 
+/**
+ * Full Sync Mode (direct gateway write operations — pushing definition and
+ * policy edits straight to the gateway) is intentionally locked off for this
+ * initial release, regardless of what
+ * `wso2ApiPlatformGateway.enableWriteOperations` is set to in any config
+ * layer (app-config.yaml, an env var override, a production overlay, etc).
+ *
+ * Why: this feature has no per-API or per-team authorization model yet.
+ * Enabling it grants ANY authenticated Backstage user who can reach this
+ * plugin's routes the ability to push definition/policy changes straight to
+ * the gateway — i.e. any Backstage user holding valid gateway credentials
+ * could change any API on the gateway, not just ones they own. That gap is
+ * accepted for this release only because writes are effectively disabled;
+ * it MUST be addressed with proper authorization before this lock is ever
+ * removed.
+ *
+ * To re-enable in a future release: add the authorization checks described
+ * above, then set this back to `false` so the config value takes effect
+ * again, and update this comment.
+ */
+export const GATEWAY_WRITE_OPERATIONS_LOCKED = true;
+
 function getOptionalBoolean(
   config: RootConfigService,
   key: string,
@@ -85,20 +107,30 @@ export function readWso2ApiPlatformConfig(
     getOptionalConfigArray(config, 'wso2ApiPlatformGateway.gateways') ?? [];
   const platformGatewayEnabled =
     getOptionalBoolean(config, 'wso2ApiPlatformGateway.enabled') ?? false;
+  const platformGatewayEnableWriteOperations = GATEWAY_WRITE_OPERATIONS_LOCKED
+    ? false
+    : getOptionalBoolean(
+        config,
+        'wso2ApiPlatformGateway.enableWriteOperations',
+      ) ?? false;
 
-  const selfHostedGateways = platformGatewayEnabled
+  const platformGateways = platformGatewayEnabled
     ? platformGatewayConfigs.map(gw => {
-        const discoveryUsername = gw.getOptionalString('discoveryUsername');
-        const discoveryPassword = gw.getOptionalString('discoveryPassword');
+        const managementApiUsername = gw.getOptionalString(
+          'managementApiUsername',
+        );
+        const managementApiPassword = gw.getOptionalString(
+          'managementApiPassword',
+        );
 
         return {
           name: gw.getString('name'),
-          urls: gw.getStringArray('urls'),
-          discoveryUrl: gw.getOptionalString('discoveryUrl'),
-          discoveryAuth:
-            discoveryUsername && discoveryPassword
+          runtimeUrls: gw.getStringArray('runtimeUrls'),
+          managementApiUrl: gw.getOptionalString('managementApiUrl'),
+          managementApiAuth:
+            managementApiUsername && managementApiPassword
               ? `Basic ${Buffer.from(
-                  `${discoveryUsername}:${discoveryPassword}`,
+                  `${managementApiUsername}:${managementApiPassword}`,
                 ).toString('base64')}`
               : undefined,
           environmentType:
@@ -115,6 +147,7 @@ export function readWso2ApiPlatformConfig(
     },
     platformGateway: {
       enabled: platformGatewayEnabled,
+      enableWriteOperations: platformGatewayEnableWriteOperations,
     },
     baseUrl,
     publisherBasePath,
@@ -130,6 +163,6 @@ export function readWso2ApiPlatformConfig(
     tls: {
       rejectUnauthorized: tlsRejectUnauthorized,
     },
-    selfHostedGateways,
+    platformGateways,
   };
 }

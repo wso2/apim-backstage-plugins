@@ -17,8 +17,22 @@
  */
 
 import express from 'express';
-import { LoggerService } from '@backstage/backend-plugin-api';
+import { HttpAuthService, LoggerService } from '@backstage/backend-plugin-api';
+import type { CatalogService } from '@backstage/plugin-catalog-node';
 import { Wso2ApiPlatformClient } from '../client';
+import {
+  DefinitionStorageConfig,
+  DocumentStorageConfig,
+  PolicyStorageConfig,
+} from '../documents/config';
+import { ApiDocumentStoreResolver } from '../documents/stores/ApiDocumentStoreResolver';
+import { ApiDefinitionStoreResolver } from '../documents/stores/ApiDefinitionStoreResolver';
+import { ApiDefinitionStore } from '../documents/stores/ApiDefinitionStore';
+import { ApiDocumentStore } from '../documents/stores/ApiDocumentStore';
+import { ApiSubscriptionPlanStore } from '../documents/stores/ApiSubscriptionPlanStore';
+import { ApiPortalConfig } from '../apiPortal/config';
+import { ApiPortalClient } from '../apiPortal/ApiPortalClient';
+import { ApiPortalTokenProvider } from '../apiPortal/tokenProvider';
 
 export type EnsureAuthenticated = (
   req: express.Request,
@@ -28,4 +42,26 @@ export type RouteContext = {
   client: Wso2ApiPlatformClient;
   ensureAuthenticated: EnsureAuthenticated;
   logger: LoggerService;
+  // Present only once the router has database + catalog support wired up
+  // (see router.ts); registerDocumentRoutes/registerDefinitionRoutes no-op
+  // without them so older test doubles that build a bare RouteContext keep
+  // working unmodified.
+  storeResolver?: ApiDocumentStoreResolver;
+  httpAuth?: HttpAuthService;
+  catalog?: CatalogService;
+  documentStorage?: DocumentStorageConfig;
+  definitionStoreResolver?: ApiDefinitionStoreResolver;
+  definitionStorage?: DefinitionStorageConfig;
+  // Policy routes need only catalog + httpAuth (no database — policies are
+  // always read/applied live against the gateway); see registerPolicyRoutes.
+  policyStorage?: PolicyStorageConfig;
+  apiPortalConfig?: ApiPortalConfig;
+  apiPortalClient?: ApiPortalClient;
+  // Present only when auth.idp.strategy is 'service-account'; every other
+  // strategy (including 'platform-login') still expects the frontend to
+  // forward a token via the x-api-portal-access-token header.
+  apiPortalTokenProvider?: ApiPortalTokenProvider;
+  apiPortalDefinitionStore?: ApiDefinitionStore;
+  apiPortalDocumentStore?: ApiDocumentStore;
+  apiPortalSubscriptionStore?: ApiSubscriptionPlanStore;
 };

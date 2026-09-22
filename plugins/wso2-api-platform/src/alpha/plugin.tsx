@@ -42,9 +42,9 @@ const isWso2ApiEntity = (entity?: Entity): boolean =>
       entity.metadata.annotations?.['wso2-gateway.com/api-id'],
   );
 
-const isSelfHostedGatewayEntity = (entity?: Entity): boolean =>
+const isApiPlatformGatewayEntity = (entity?: Entity): boolean =>
   entity?.metadata.annotations?.['wso2.com/api-discovery-type'] ===
-  'self-hosted-gateway';
+  'api-platform-gateway';
 
 const isApiPlatformEntity = (entity?: Entity): boolean =>
   !!entity?.metadata.annotations?.['wso2.com/platform-gateway-endpoints'];
@@ -90,7 +90,7 @@ export const entityWso2DocsContent: ExtensionDefinition =
     name: 'wso2-docs',
     params: {
       path: '/docs',
-      title: 'Docs',
+      title: 'Documents',
       group: 'wso2-docs',
       filter: isWso2ApiEntityExceptService,
       loader: () =>
@@ -108,7 +108,7 @@ export const entityWso2McpToolingContent: ExtensionDefinition =
       title: 'Tools',
       group: 'wso2-tools',
       filter: e =>
-        isWso2ApiEntity(e) && !isSelfHostedGatewayEntity(e) && isMcpEntity(e!),
+        isWso2ApiEntity(e) && !isApiPlatformGatewayEntity(e) && isMcpEntity(e!),
       loader: () =>
         import('../components/EntityTabs/DefinitionTab').then(m => (
           <m.EntityWso2McpToolsTab />
@@ -154,11 +154,7 @@ export const entityWso2DefinitionContent: ExtensionDefinition =
       path: '/definition',
       title: 'Definition',
       group: 'wso2-definition',
-      filter: e => {
-        return (
-          isWso2ApiEntityExceptServiceAndMcp(e) && !isSelfHostedGatewayEntity(e)
-        );
-      },
+      filter: isWso2ApiEntityExceptServiceAndMcp,
       loader: () =>
         import('../components/EntityTabs/DefinitionTab').then(m => (
           <m.EntityWso2ApiDefinitionTab />

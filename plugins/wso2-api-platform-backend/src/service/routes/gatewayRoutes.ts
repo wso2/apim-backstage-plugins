@@ -17,6 +17,7 @@
  */
 
 import express from 'express';
+import { gatewayStatusTracker } from '@wso2/backstage-plugin-catalog-backend-module-wso2-api-platform';
 import { RouteContext } from './types';
 
 export function registerGatewayRoutes(
@@ -54,12 +55,15 @@ export function registerGatewayRoutes(
         }
       }
 
-      if (config.platformGateway?.enabled && config.selfHostedGateways) {
-        const gwPromises = config.selfHostedGateways.map(async gw => {
+      if (config.platformGateway?.enabled && config.platformGateways) {
+        const gwPromises = config.platformGateways.map(async gw => {
           let status = 'Online';
-          if (gw.discoveryUrl) {
+          if (gw.managementApiUrl) {
             try {
-              await client.getGatewayApis(gw.discoveryUrl, gw.discoveryAuth);
+              await client.getGatewayApis(
+                gw.managementApiUrl,
+                gw.managementApiAuth,
+              );
             } catch (error) {
               status = 'Offline';
             }
@@ -67,16 +71,17 @@ export function registerGatewayRoutes(
           return {
             name: gw.name,
             type: 'wso2',
-            gatewayType: 'Self Hosted',
-            description: gw.description || `Self-Hosted Gateway: ${gw.name}`,
+            gatewayType: 'API Platform',
+            description: gw.description || `API Platform Gateway: ${gw.name}`,
             source: 'Config',
-            urls: gw.discoveryUrl ? [gw.discoveryUrl] : [],
+            urls: gw.runtimeUrls,
             status,
+            active: gatewayStatusTracker.getStatus(gw.name).active,
           };
         });
 
-        const selfHostedGateways = await Promise.all(gwPromises);
-        gateways.push(...selfHostedGateways);
+        const platformGateways = await Promise.all(gwPromises);
+        gateways.push(...platformGateways);
       }
 
       res.json(gateways);

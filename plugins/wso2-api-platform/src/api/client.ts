@@ -16,13 +16,32 @@
  * under the License.
  */
 
+import { CompoundEntityRef } from '@backstage/catalog-model';
 import { DiscoveryApi, FetchApi } from '@backstage/core-plugin-api';
 import {
+  CreateWso2ApiDocumentRequest,
+  UpdateWso2ApiDocumentMetadataRequest,
+  UpsertWso2ApiDefinitionRequest,
+  UpsertWso2ApiPolicyArtifactRequest,
+  Wso2ApiDefinitionResponse,
+  Wso2ApiDocument,
+  Wso2ApiDocumentListResponse,
+  Wso2ApiPolicyArtifact,
+  Wso2ApiPolicyArtifactResponse,
   Wso2ApiRevisionsResponse,
   Wso2ApiPlatformApi,
   Wso2ApiPlatformRuntimeConfig,
+  Wso2ApiPortalInfo,
+  Wso2ApiPortalPublishOverrides,
+  Wso2ApiPortalPublishResult,
+  Wso2ApiPortalSubscriptionsResponse,
+  Wso2DefinitionDiffResponse,
+  Wso2GatewaySummary,
   Wso2GenerateApiKeyOptions,
+  Wso2PolicyDiffResponse,
 } from './types';
+
+const PORTAL_TOKEN_HEADER = 'x-api-portal-access-token';
 
 /**
  * Client for interacting with the WSO2 API Manager backend.
@@ -49,6 +68,7 @@ export class Wso2ApiPlatformClient implements Wso2ApiPlatformApi {
       method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
       body?: any;
       token?: string;
+      portalToken?: string;
       query?: URLSearchParams;
     },
   ): Promise<T> {
@@ -68,6 +88,10 @@ export class Wso2ApiPlatformClient implements Wso2ApiPlatformApi {
       headers['X-WSO2-Access-Token'] = options.token;
     }
 
+    if (options?.portalToken) {
+      headers[PORTAL_TOKEN_HEADER] = options.portalToken;
+    }
+
     if (options?.method === 'POST' || options?.method === 'PUT') {
       headers['Content-Type'] = 'application/json';
     }
@@ -78,11 +102,18 @@ export class Wso2ApiPlatformClient implements Wso2ApiPlatformApi {
       body: options?.body ? JSON.stringify(options.body) : undefined,
     });
 
+    return this.parseJsonResponse<T>(response);
+  }
+
+  /**
+   * Same response handling as `request<T>()`, factored out so the
+   * multipart document-create path (which cannot set a JSON Content-Type
+   * header — the browser must set its own multipart boundary) can share it.
+   */
+  private async parseJsonResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `WSO2 API request failed [${response.status}]: ${errorText}`,
-      );
+      throw new Error(this.extractErrorMessage(response.status, errorText));
     }
 
     const text = await response.text();
@@ -95,6 +126,48 @@ export class Wso2ApiPlatformClient implements Wso2ApiPlatformApi {
     } catch (e) {
       throw new Error(`Failed to parse WSO2 API response: ${text}`);
     }
+  }
+
+  /** Prefers Backstage's `{error:{message}}` envelope over the raw response body. */
+  private extractErrorMessage(status: number, errorText: string): string {
+    try {
+      const parsed = JSON.parse(errorText);
+      const message = parsed?.error?.message;
+      if (typeof message === 'string' && message.trim()) {
+        return message;
+      }
+    } catch {
+      // Not a JSON error envelope (e.g. an HTML error page); fall through.
+    }
+    return `WSO2 API request failed [${status}]: ${errorText}`;
+  }
+
+  private entityDocumentsPath(entityRef: CompoundEntityRef): string {
+    const kind = encodeURIComponent(entityRef.kind.toLowerCase());
+    const namespace = encodeURIComponent(entityRef.namespace || 'default');
+    const name = encodeURIComponent(entityRef.name);
+    return `/entities/${kind}/${namespace}/${name}/documents`;
+  }
+
+  private entityDefinitionPath(entityRef: CompoundEntityRef): string {
+    const kind = encodeURIComponent(entityRef.kind.toLowerCase());
+    const namespace = encodeURIComponent(entityRef.namespace || 'default');
+    const name = encodeURIComponent(entityRef.name);
+    return `/entities/${kind}/${namespace}/${name}/definition`;
+  }
+
+  private entityPoliciesPath(entityRef: CompoundEntityRef): string {
+    const kind = encodeURIComponent(entityRef.kind.toLowerCase());
+    const namespace = encodeURIComponent(entityRef.namespace || 'default');
+    const name = encodeURIComponent(entityRef.name);
+    return `/entities/${kind}/${namespace}/${name}/policies`;
+  }
+
+  private entityApiPortalPath(entityRef: CompoundEntityRef): string {
+    const kind = encodeURIComponent(entityRef.kind.toLowerCase());
+    const namespace = encodeURIComponent(entityRef.namespace || 'default');
+    const name = encodeURIComponent(entityRef.name);
+    return `/entities/${kind}/${namespace}/${name}/api-portal`;
   }
 
   async generateApiKey(
@@ -126,8 +199,10 @@ export class Wso2ApiPlatformClient implements Wso2ApiPlatformApi {
     );
   }
 
-  async getGateways(token?: string): Promise<any[]> {
-    const result = await this.request<any[]>('/gateways', { token });
+  async getGateways(token?: string): Promise<Wso2GatewaySummary[]> {
+    const result = await this.request<Wso2GatewaySummary[]>('/gateways', {
+      token,
+    });
     return Array.isArray(result) ? result : [];
   }
 
@@ -147,10 +222,189 @@ export class Wso2ApiPlatformClient implements Wso2ApiPlatformApi {
     const response = await this.fetchApi.fetch(url.toString(), { headers });
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `WSO2 API request failed [${response.status}]: ${errorText}`,
-      );
+      throw new Error(this.extractErrorMessage(response.status, errorText));
     }
     return response.blob();
+  }
+
+  async listDocuments(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiDocumentListResponse> {
+    return this.request<Wso2ApiDocumentListResponse>(
+      this.entityDocumentsPath(entityRef),
+    );
+  }
+
+  async getDocument(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+  ): Promise<Wso2ApiDocument> {
+    return this.request<Wso2ApiDocument>(
+      `${this.entityDocumentsPath(entityRef)}/${encodeURIComponent(
+        documentId,
+      )}`,
+    );
+  }
+
+  async createDocument(
+    entityRef: CompoundEntityRef,
+    input: CreateWso2ApiDocumentRequest,
+  ): Promise<Wso2ApiDocument> {
+    const path = this.entityDocumentsPath(entityRef);
+
+    if (input.sourceType === 'FILE') {
+      if (!input.file) {
+        throw new Error("A file is required when sourceType is 'FILE'");
+      }
+      const { file, ...metadata } = input;
+      const formData = new FormData();
+      formData.append('metadata', JSON.stringify(metadata));
+      formData.append('file', file, file.name);
+
+      const baseUrl = await this.getBaseUrl();
+      const response = await this.fetchApi.fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        body: formData,
+      });
+      return this.parseJsonResponse<Wso2ApiDocument>(response);
+    }
+
+    return this.request<Wso2ApiDocument>(path, {
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  async updateDocumentMetadata(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+    patch: UpdateWso2ApiDocumentMetadataRequest,
+  ): Promise<Wso2ApiDocument> {
+    return this.request<Wso2ApiDocument>(
+      `${this.entityDocumentsPath(entityRef)}/${encodeURIComponent(
+        documentId,
+      )}`,
+      { method: 'PUT', body: patch },
+    );
+  }
+
+  async deleteDocument(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+  ): Promise<void> {
+    await this.request<void>(
+      `${this.entityDocumentsPath(entityRef)}/${encodeURIComponent(
+        documentId,
+      )}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  async getDocumentContentUrl(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+  ): Promise<string> {
+    const baseUrl = await this.getBaseUrl();
+    return `${baseUrl}${this.entityDocumentsPath(
+      entityRef,
+    )}/${encodeURIComponent(documentId)}/content`;
+  }
+
+  async getDefinition(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiDefinitionResponse> {
+    return this.request<Wso2ApiDefinitionResponse>(
+      this.entityDefinitionPath(entityRef),
+    );
+  }
+
+  async upsertDefinition(
+    entityRef: CompoundEntityRef,
+    input: UpsertWso2ApiDefinitionRequest,
+  ): Promise<Wso2ApiDefinitionResponse> {
+    return this.request<Wso2ApiDefinitionResponse>(
+      this.entityDefinitionPath(entityRef),
+      { method: 'PUT', body: input },
+    );
+  }
+
+  async deleteDefinition(entityRef: CompoundEntityRef): Promise<void> {
+    await this.request<void>(this.entityDefinitionPath(entityRef), {
+      method: 'DELETE',
+    });
+  }
+
+  async previewDefinitionDiff(
+    entityRef: CompoundEntityRef,
+    content: string,
+  ): Promise<Wso2DefinitionDiffResponse> {
+    return this.request<Wso2DefinitionDiffResponse>(
+      `${this.entityDefinitionPath(entityRef)}/diff`,
+      { method: 'POST', body: { content } },
+    );
+  }
+
+  async getPolicyArtifact(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiPolicyArtifactResponse> {
+    return this.request<Wso2ApiPolicyArtifactResponse>(
+      this.entityPoliciesPath(entityRef),
+    );
+  }
+
+  async upsertPolicyArtifact(
+    entityRef: CompoundEntityRef,
+    input: UpsertWso2ApiPolicyArtifactRequest,
+  ): Promise<Wso2ApiPolicyArtifactResponse> {
+    return this.request<Wso2ApiPolicyArtifactResponse>(
+      this.entityPoliciesPath(entityRef),
+      { method: 'PUT', body: input },
+    );
+  }
+
+  async previewPolicyDiff(
+    entityRef: CompoundEntityRef,
+    input: Wso2ApiPolicyArtifact,
+  ): Promise<Wso2PolicyDiffResponse> {
+    return this.request<Wso2PolicyDiffResponse>(
+      `${this.entityPoliciesPath(entityRef)}/diff`,
+      { method: 'POST', body: input },
+    );
+  }
+
+  async getApiPortalInfo(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiPortalInfo> {
+    return this.request<Wso2ApiPortalInfo>(this.entityApiPortalPath(entityRef));
+  }
+
+  async publishToApiPortal(
+    entityRef: CompoundEntityRef,
+    accessToken: string | undefined,
+    overrides: Wso2ApiPortalPublishOverrides,
+  ): Promise<Wso2ApiPortalPublishResult> {
+    return this.request<Wso2ApiPortalPublishResult>(
+      `${this.entityApiPortalPath(entityRef)}/publish`,
+      { method: 'POST', portalToken: accessToken, body: overrides },
+    );
+  }
+
+  async getApiPortalSubscriptions(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiPortalSubscriptionsResponse> {
+    return this.request<Wso2ApiPortalSubscriptionsResponse>(
+      `${this.entityApiPortalPath(entityRef)}/subscriptions`,
+    );
+  }
+
+  async updateApiPortalSubscriptions(
+    entityRef: CompoundEntityRef,
+    planIds: string[],
+  ): Promise<Wso2ApiPortalSubscriptionsResponse> {
+    return this.request<Wso2ApiPortalSubscriptionsResponse>(
+      `${this.entityApiPortalPath(entityRef)}/subscriptions`,
+      { method: 'PUT', body: { planIds } },
+    );
   }
 }

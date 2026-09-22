@@ -69,6 +69,8 @@ export type Wso2ApiPlatformConfig = {
   };
   platformGateway: {
     enabled: boolean;
+    /** Master switch for gateway writes. */
+    enableWriteOperations: boolean;
   };
   baseUrl: string;
   publisherBasePath: string;
@@ -84,11 +86,11 @@ export type Wso2ApiPlatformConfig = {
   tls: {
     rejectUnauthorized: boolean;
   };
-  selfHostedGateways: Array<{
+  platformGateways: Array<{
     name: string;
-    urls: string[];
-    discoveryUrl?: string;
-    discoveryAuth?: string;
+    runtimeUrls: string[];
+    managementApiUrl?: string;
+    managementApiAuth?: string;
     environmentType: string;
     description?: string;
     organizationId?: string;

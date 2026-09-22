@@ -30,19 +30,32 @@ export const wso2ApiPlatformPlugin = createBackendPlugin({
       deps: {
         auth: coreServices.auth,
         catalog: catalogServiceRef,
+        database: coreServices.database,
         httpAuth: coreServices.httpAuth,
         httpRouter: coreServices.httpRouter,
         logger: coreServices.logger,
         config: coreServices.rootConfig,
+        scheduler: coreServices.scheduler,
       },
-      async init({ auth, catalog, httpAuth, httpRouter, logger, config }) {
+      async init({
+        auth,
+        catalog,
+        database,
+        httpAuth,
+        httpRouter,
+        logger,
+        config,
+        scheduler,
+      }) {
         httpRouter.use(
           await createRouter({
             auth,
             catalog,
+            database,
             httpAuth,
             logger,
             config,
+            scheduler,
           }),
         );
       },

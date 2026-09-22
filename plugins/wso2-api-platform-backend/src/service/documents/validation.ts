@@ -1,0 +1,296 @@
+/*
+ * Copyright (c) 2026, WSO2 LLC. (http://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { InputError } from '@backstage/errors';
+import { z } from 'zod';
+import {
+  DocumentStorageConfig,
+  DefinitionStorageConfig,
+  PolicyStorageConfig,
+} from './config';
+
+// SWAGGER_DOC is legacy/APIM-internal and intentionally excluded from the
+// create/edit dropdown — it can still be read back on the on-prem path via
+// ApimPublisherDocumentStore, which bypasses this schema.
+const DOCUMENT_TYPE = z.enum([
+  'HOWTO',
+  'SAMPLES',
+  'PUBLIC_FORUM',
+  'SUPPORT_FORUM',
+  'API_MESSAGE_FORMAT',
+  'OTHER',
+]);
+
+const SOURCE_TYPE = z.enum(['INLINE', 'MARKDOWN', 'URL', 'FILE']);
+
+const createDocumentMetadataSchema = z.object({
+  name: z.string().trim().min(1).max(191),
+  type: DOCUMENT_TYPE,
+  otherTypeName: z.string().trim().max(255).optional(),
+  summary: z.string().max(4000).optional(),
+  sourceType: SOURCE_TYPE,
+  sourceUrl: z.string().trim().optional(),
+  inlineContent: z.string().optional(),
+});
+
+export type CreateDocumentMetadataBody = z.infer<
+  typeof createDocumentMetadataSchema
+>;
+
+const updateDocumentMetadataSchema = z
+  .object({
+    name: z.string().trim().min(1).max(191).optional(),
+    type: DOCUMENT_TYPE.optional(),
+    otherTypeName: z.string().trim().max(255).optional(),
+    summary: z.string().max(4000).optional(),
+    sourceUrl: z.string().trim().optional(),
+  })
+  .strict();
+
+export type UpdateDocumentMetadataBody = z.infer<
+  typeof updateDocumentMetadataSchema
+>;
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function assertBusinessRules(body: {
+  type: string;
+  otherTypeName?: string;
+  sourceType: string;
+  sourceUrl?: string;
+  inlineContent?: string;
+}) {
+  if (body.type === 'OTHER' && !body.otherTypeName) {
+    throw new InputError("otherTypeName is required when type is 'OTHER'");
+  }
+  if (body.sourceType === 'URL') {
+    if (!body.sourceUrl || !isHttpUrl(body.sourceUrl)) {
+      throw new InputError(
+        "sourceUrl is required and must be an http(s) URL when sourceType is 'URL'",
+      );
+    }
+  }
+  if (
+    (body.sourceType === 'INLINE' || body.sourceType === 'MARKDOWN') &&
+    !body.inlineContent?.trim()
+  ) {
+    throw new InputError(
+      `inlineContent is required and must be non-empty when sourceType is '${body.sourceType}'`,
+    );
+  }
+}
+
+export function parseCreateDocumentMetadata(
+  raw: unknown,
+  opts?: { allowedSourceTypes?: string[] },
+): CreateDocumentMetadataBody {
+  const result = createDocumentMetadataSchema.safeParse(raw);
+  if (!result.success) {
+    throw new InputError(`Invalid document metadata: ${result.error.message}`);
+  }
+  assertBusinessRules(result.data);
+  if (
+    opts?.allowedSourceTypes &&
+    !opts.allowedSourceTypes.includes(result.data.sourceType)
+  ) {
+    throw new InputError(
+      `Gateway-discovered APIs support markdown documents only, because the ` +
+        `WSO2 API Portal ingests markdown documents. Received sourceType ` +
+        `'${result.data.sourceType}'.`,
+    );
+  }
+  return result.data;
+}
+
+export function parseUpdateDocumentMetadata(
+  raw: unknown,
+): UpdateDocumentMetadataBody {
+  const result = updateDocumentMetadataSchema.safeParse(raw);
+  if (!result.success) {
+    throw new InputError(
+      `Invalid document metadata patch: ${result.error.message}. Content fields ` +
+        '(sourceType, inlineContent, fileName, file) are not editable — ' +
+        'content updates are not supported in this release.',
+    );
+  }
+  if (
+    result.data.sourceUrl !== undefined &&
+    !isHttpUrl(result.data.sourceUrl)
+  ) {
+    throw new InputError('sourceUrl must be an http(s) URL');
+  }
+  return result.data;
+}
+
+export function assertInlineSizeWithinLimit(
+  content: string,
+  config: DocumentStorageConfig,
+) {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (bytes > config.maxInlineSizeBytes) {
+    throw new InputError(
+      `Document content is ${bytes} bytes, exceeding the configured limit of ${config.maxInlineSizeBytes} bytes`,
+    );
+  }
+}
+
+export function assertFileAllowed(
+  file: { originalname: string; mimetype?: string; size: number },
+  config: DocumentStorageConfig,
+) {
+  if (file.size > config.maxFileSizeBytes) {
+    throw new InputError(
+      `File is ${file.size} bytes, exceeding the configured limit of ${config.maxFileSizeBytes} bytes`,
+    );
+  }
+  const ext = file.originalname.split('.').pop()?.toLowerCase();
+  if (
+    config.allowedExtensions.length > 0 &&
+    (!ext || !config.allowedExtensions.includes(ext))
+  ) {
+    throw new InputError(
+      `File extension '${
+        ext ?? ''
+      }' is not in the allowed list: ${config.allowedExtensions.join(', ')}`,
+    );
+  }
+  if (
+    config.allowedMimeTypes.length > 0 &&
+    file.mimetype &&
+    !config.allowedMimeTypes.includes(file.mimetype)
+  ) {
+    throw new InputError(
+      `File MIME type '${
+        file.mimetype
+      }' is not in the allowed list: ${config.allowedMimeTypes.join(', ')}`,
+    );
+  }
+}
+
+// WSO2 only ever accepts an API definition as OpenAPI JSON or YAML text, so
+// this is fixed rather than a configurable allow-list like documents'.
+const DEFINITION_ALLOWED_EXTENSIONS = ['yaml', 'yml', 'json'];
+
+const upsertDefinitionSchema = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  content: z.string().min(1),
+});
+
+export type UpsertDefinitionBody = z.infer<typeof upsertDefinitionSchema>;
+
+export function parseUpsertDefinitionInput(raw: unknown): UpsertDefinitionBody {
+  const result = upsertDefinitionSchema.safeParse(raw);
+  if (!result.success) {
+    throw new InputError(`Invalid definition payload: ${result.error.message}`);
+  }
+  const ext = result.data.fileName.split('.').pop()?.toLowerCase();
+  if (!ext || !DEFINITION_ALLOWED_EXTENSIONS.includes(ext)) {
+    throw new InputError(
+      `File extension '${
+        ext ?? ''
+      }' is not supported for API definitions. Allowed: ${DEFINITION_ALLOWED_EXTENSIONS.join(
+        ', ',
+      )}`,
+    );
+  }
+  return result.data;
+}
+
+const previewDefinitionSchema = z.object({
+  content: z.string().min(1),
+});
+
+export type PreviewDefinitionBody = z.infer<typeof previewDefinitionSchema>;
+
+export function parsePreviewDefinitionInput(
+  raw: unknown,
+): PreviewDefinitionBody {
+  const result = previewDefinitionSchema.safeParse(raw);
+  if (!result.success) {
+    throw new InputError(`Invalid definition payload: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+export function assertDefinitionSizeWithinLimit(
+  content: string,
+  config: DefinitionStorageConfig,
+) {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (bytes > config.maxSizeBytes) {
+    throw new InputError(
+      `Definition content is ${bytes} bytes, exceeding the configured limit of ${config.maxSizeBytes} bytes`,
+    );
+  }
+}
+
+// Policies are `unknown` in shape (either a flat array, or a
+// `{request,response,fault}` object) — this schema only pins down the
+// envelope, not what a single policy entry looks like.
+const policiesValueSchema = z.union([
+  z.array(z.unknown()),
+  z
+    .object({
+      request: z.array(z.unknown()).optional(),
+      response: z.array(z.unknown()).optional(),
+      fault: z.array(z.unknown()).optional(),
+    })
+    .passthrough(),
+]);
+
+const upsertPolicyArtifactSchema = z.object({
+  apiPolicies: policiesValueSchema,
+  operations: z.array(
+    z.object({
+      method: z.string().trim().min(1),
+      path: z.string().trim().min(1),
+      policies: policiesValueSchema,
+    }),
+  ),
+});
+
+export type UpsertPolicyArtifactBody = z.infer<
+  typeof upsertPolicyArtifactSchema
+>;
+
+export function parseUpsertPolicyInput(raw: unknown): UpsertPolicyArtifactBody {
+  const result = upsertPolicyArtifactSchema.safeParse(raw);
+  if (!result.success) {
+    throw new InputError(`Invalid policy payload: ${result.error.message}`);
+  }
+  return result.data;
+}
+
+export function assertPolicySizeWithinLimit(
+  input: UpsertPolicyArtifactBody,
+  config: PolicyStorageConfig,
+) {
+  const bytes = Buffer.byteLength(JSON.stringify(input), 'utf8');
+  if (bytes > config.maxSizeBytes) {
+    throw new InputError(
+      `Policy payload is ${bytes} bytes, exceeding the configured limit of ${config.maxSizeBytes} bytes`,
+    );
+  }
+}

@@ -1,0 +1,175 @@
+/** @jest-environment jsdom */
+/*
+ * Copyright (c) 2026, WSO2 LLC. (http://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { EntityWso2ApiDefinitionTab } from './ApiTab';
+
+function renderTab() {
+  return render(
+    <MemoryRouter>
+      <EntityWso2ApiDefinitionTab />
+    </MemoryRouter>,
+  );
+}
+
+const mockConfigApi = {
+  getOptionalBoolean: jest.fn().mockReturnValue(true),
+  getOptionalNumber: jest.fn().mockReturnValue(1024),
+};
+const mockWso2Api = {
+  getDefinition: jest.fn(),
+  getApiWsdl: jest.fn(),
+};
+
+let mockEntity: any;
+
+jest.mock('@backstage/plugin-catalog-react', () => ({
+  useEntity: () => ({ entity: mockEntity }),
+}));
+
+jest.mock('@backstage/core-plugin-api', () => ({
+  configApiRef: { id: 'core.config' },
+  createApiRef: jest.fn().mockReturnValue({}),
+  createRouteRef: jest.fn().mockReturnValue({}),
+  createExternalRouteRef: jest.fn().mockReturnValue({}),
+  useRouteRef: () => () => '/wso2-api-platform',
+  useApi: (apiRef: any) =>
+    apiRef.id === 'core.config' ? mockConfigApi : mockWso2Api,
+}));
+
+jest.mock('@backstage/core-components', () => ({
+  InfoCard: ({ children }: any) => <section>{children}</section>,
+  EmptyState: ({ title, description }: any) => (
+    <div>
+      <span>{title}</span>
+      <span>{description}</span>
+    </div>
+  ),
+}));
+
+// swagger-ui-react (loaded by SwaggerDefinitionPreview) pulls in swagger-client,
+// which ships ESM-only code Jest's default CJS transform can't parse — mocked
+// out the same way TryOutTab.test.tsx mocks SwaggerConsole.
+jest.mock('./SwaggerDefinitionPreview', () => ({
+  SwaggerDefinitionPreview: () => (
+    <div data-testid="swagger-definition-preview" />
+  ),
+}));
+
+jest.mock('@monaco-editor/react', () => ({
+  __esModule: true,
+  default: ({ value }: any) => (
+    <pre data-testid="definition-viewer">{value}</pre>
+  ),
+}));
+
+const GATEWAY_ENTITY = {
+  apiVersion: 'backstage.io/v1alpha1',
+  kind: 'API',
+  metadata: {
+    name: 'orders-api',
+    namespace: 'wso2-gateways',
+    annotations: {
+      'wso2.com/api-discovery-type': 'api-platform-gateway',
+      'wso2-gateway.com/api-id': 'gw-api-1',
+    },
+  },
+  spec: {},
+};
+
+const APIM_ENTITY = {
+  apiVersion: 'backstage.io/v1alpha1',
+  kind: 'API',
+  metadata: {
+    name: 'orders-api',
+    namespace: 'default',
+    annotations: { 'wso2.com/api-id': 'apim-api-1' },
+  },
+  spec: { definition: 'openapi: 3.0.0\ninfo:\n  title: Orders' },
+};
+
+describe('EntityWso2ApiDefinitionTab', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockConfigApi.getOptionalBoolean.mockReturnValue(true);
+  });
+
+  it('shows an "Add Definition" button for a gateway API with no definition yet', async () => {
+    mockEntity = GATEWAY_ENTITY;
+    mockWso2Api.getDefinition.mockResolvedValue({
+      definition: null,
+      capabilities: { read: true, write: true },
+    });
+
+    renderTab();
+
+    expect(
+      await screen.findByRole('button', { name: 'Add Definition' }),
+    ).toBeDefined();
+    expect(screen.queryByTestId('definition-viewer')).toBeNull();
+  });
+
+  it('shows the viewer and an "Upload" button once a gateway API has a definition', async () => {
+    mockEntity = GATEWAY_ENTITY;
+    mockWso2Api.getDefinition.mockResolvedValue({
+      definition: { content: 'openapi: 3.0.0', format: 'YAML' },
+      capabilities: { read: true, write: true },
+    });
+
+    renderTab();
+
+    expect(await screen.findByRole('button', { name: 'Upload' })).toBeDefined();
+    expect(screen.getByTestId('definition-viewer').textContent).toContain(
+      'openapi: 3.0.0',
+    );
+  });
+
+  it('shows the live Swagger preview only once editing starts', async () => {
+    mockEntity = GATEWAY_ENTITY;
+    mockWso2Api.getDefinition.mockResolvedValue({
+      definition: { content: 'openapi: 3.0.0', format: 'YAML' },
+      capabilities: { read: true, write: true },
+    });
+
+    renderTab();
+
+    await screen.findByTestId('definition-viewer');
+    expect(screen.queryByTestId('swagger-definition-preview')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.getByTestId('swagger-definition-preview')).toBeDefined();
+  });
+
+  it('renders the on-prem definition from the catalog with no Add/Update button (regression)', async () => {
+    mockEntity = APIM_ENTITY;
+
+    renderTab();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('definition-viewer').textContent).toContain(
+        'openapi: 3.0.0',
+      ),
+    );
+    expect(screen.queryByRole('button', { name: 'Add Definition' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull();
+    expect(mockWso2Api.getDefinition).not.toHaveBeenCalled();
+  });
+});

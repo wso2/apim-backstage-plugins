@@ -1,7 +1,21 @@
+import { CompoundEntityRef } from '@backstage/catalog-model';
+
 export type Wso2GatewayInfo = {
   name?: string;
   displayName?: string;
   gatewayType: string;
+};
+
+/** Gateway status returned by `GET /gateways`. */
+export type Wso2GatewaySummary = {
+  name: string;
+  type: string;
+  gatewayType: string;
+  description?: string;
+  source: string;
+  urls: string[];
+  status: 'Online' | 'Offline';
+  active?: boolean;
 };
 
 export type Wso2ApiSummary = {
@@ -126,24 +140,147 @@ export type Wso2ApiDetail = Wso2ApiSummary & {
   authorizationHeader?: string;
 };
 
-export type Wso2ApiDocument = {
-  id: string;
-  name: string;
-  summary?: string;
-  sourceType?: string;
-  sourceUrl?: string;
-  documentId?: string;
-  type?: string;
-};
-
 export type Wso2ApiDocumentType =
   | 'HOWTO'
   | 'SAMPLES'
   | 'PUBLIC_FORUM'
   | 'SUPPORT_FORUM'
+  | 'API_MESSAGE_FORMAT'
   | 'OTHER'
   | 'SWAGGER_DOC';
 export type Wso2ApiDocumentSourceType = 'INLINE' | 'URL' | 'FILE' | 'MARKDOWN';
+
+// Widened for the plugin-owned document store (self-hosted/OpenChoreo
+// gateway APIs): every added field is optional so the on-prem
+// annotation-parsing path (useDocuments.ts) keeps type-checking unchanged.
+export type Wso2ApiDocument = {
+  id: string;
+  name: string;
+  summary?: string;
+  sourceType?: Wso2ApiDocumentSourceType;
+  sourceUrl?: string;
+  documentId?: string;
+  type?: Wso2ApiDocumentType;
+  otherTypeName?: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  createdBy?: string;
+  createdTime?: string;
+  lastUpdatedBy?: string;
+  lastUpdatedTime?: string;
+};
+
+export type Wso2ApiDocumentCapabilities = {
+  read: boolean;
+  create: boolean;
+  updateMetadata: boolean;
+  updateContent: boolean;
+  delete: boolean;
+};
+
+export type Wso2ApiDocumentListResponse = {
+  count: number;
+  list: Wso2ApiDocument[];
+  capabilities: Wso2ApiDocumentCapabilities;
+};
+
+export type CreateWso2ApiDocumentRequest = {
+  name: string;
+  type: Wso2ApiDocumentType;
+  otherTypeName?: string;
+  summary?: string;
+  sourceType: Wso2ApiDocumentSourceType;
+  sourceUrl?: string;
+  inlineContent?: string;
+  file?: File;
+};
+
+export type UpdateWso2ApiDocumentMetadataRequest = {
+  name?: string;
+  type?: Wso2ApiDocumentType;
+  otherTypeName?: string;
+  summary?: string;
+  /** only honoured when the stored document's sourceType is URL */
+  sourceUrl?: string;
+};
+export type Wso2ApiDefinitionFormat = 'YAML' | 'JSON';
+
+export type Wso2ApiDefinition = {
+  content: string;
+  format: Wso2ApiDefinitionFormat;
+  description?: string;
+  fileName?: string;
+  sizeBytes?: number;
+  createdBy?: string;
+  createdTime?: string;
+  lastUpdatedBy?: string;
+  lastUpdatedTime?: string;
+};
+
+export type Wso2ApiDefinitionCapabilities = {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+};
+
+export type Wso2ApiDefinitionResponse = {
+  definition: Wso2ApiDefinition | null;
+  capabilities: Wso2ApiDefinitionCapabilities;
+};
+
+export type UpsertWso2ApiDefinitionRequest = {
+  fileName: string;
+  content: string;
+};
+
+export type Wso2RestApiArtifactDiff = {
+  displayNameChange?: { from: string; to: string };
+  versionChange?: { from: string; to: string };
+  descriptionChange?: { from: string; to: string };
+  addedOperations: Array<{ method: string; path: string }>;
+  removedOperations: Array<{ method: string; path: string }>;
+  hasChanges: boolean;
+};
+
+export type Wso2DefinitionDiffResponse = {
+  diff: Wso2RestApiArtifactDiff | null;
+};
+
+export type Wso2ApiPolicyArtifact = {
+  apiPolicies: unknown;
+  operations: Array<{ method: string; path: string; policies: unknown }>;
+};
+
+export type Wso2ApiPolicyArtifactResponse = {
+  policies: Wso2ApiPolicyArtifact;
+};
+
+export type UpsertWso2ApiPolicyArtifactRequest = Wso2ApiPolicyArtifact;
+
+export type Wso2PolicyChangeRef = { name: string; version: string };
+
+export type Wso2PolicyFlowDiff = {
+  flow: 'request' | 'response' | 'fault' | 'flat';
+  added: Wso2PolicyChangeRef[];
+  removed: Wso2PolicyChangeRef[];
+  changed: Wso2PolicyChangeRef[];
+};
+
+export type Wso2ApiPolicyDiff = {
+  apiLevel: Wso2PolicyFlowDiff[];
+  operations: Array<{
+    method: string;
+    path: string;
+    flows: Wso2PolicyFlowDiff[];
+  }>;
+  hasChanges: boolean;
+};
+
+export type Wso2PolicyDiffResponse = {
+  diff: Wso2ApiPolicyDiff | null;
+};
+
 export type Wso2ApiRevision = {
   id: string;
   displayName: string;
@@ -198,6 +335,63 @@ export type Wso2GenerateApiKeyOptions = {
   };
 };
 
+export type Wso2ApiPortalCapabilities = {
+  publish: boolean;
+  reason?: string;
+};
+
+export type Wso2ApiPortalAuthStrategy =
+  | 'manual'
+  | 'service-account'
+  | 'reuse-signin';
+
+export type Wso2ApiPortalAuthProviderConfig = {
+  providerId: string;
+  scopes: string[];
+};
+
+export type Wso2ApiPortalAuthConfig = {
+  mode: 'platform-login' | 'idp';
+  /** Only present when mode is 'idp'. Absent (or 'manual') means the manual token field is shown. */
+  strategy?: Wso2ApiPortalAuthStrategy;
+  reuseSignIn?: Wso2ApiPortalAuthProviderConfig;
+};
+
+export type Wso2ApiPortalInfo = {
+  enabled: boolean;
+  capabilities: Wso2ApiPortalCapabilities;
+  auth: Wso2ApiPortalAuthConfig;
+};
+
+export type Wso2ApiPortalSkippedDocument = {
+  name: string;
+  sourceType: string;
+  reason: string;
+};
+
+export type Wso2ApiPortalPublishResult = {
+  portalApiId: string;
+  portalUrl: string;
+  operation: 'created' | 'updated';
+  publishedAt: string;
+  documents: { published: number; skipped: Wso2ApiPortalSkippedDocument[] };
+  warnings: string[];
+};
+
+export type Wso2ApiPortalPublishOverrides = {
+  displayName: string;
+  productionEndpoint: string;
+  sandboxEndpoint?: string;
+  labels: string[];
+};
+
+export type Wso2ApiPortalSubscriptionsResponse = {
+  /** Custom, org-provisioned plan IDs (beyond the four built-in defaults) available for selection. */
+  availableCustomPlanIds: string[];
+  /** This API's currently selected subscription plan IDs. */
+  selectedPlanIds: string[];
+};
+
 export interface Wso2ApiPlatformApi {
   generateApiKey(
     apiId: string,
@@ -207,7 +401,71 @@ export interface Wso2ApiPlatformApi {
     apiId: string,
     options?: { query?: string; token?: string },
   ): Promise<Wso2ApiRevisionsResponse>;
-  getGateways(token?: string): Promise<any[]>;
+  getGateways(token?: string): Promise<Wso2GatewaySummary[]>;
   getRuntimeConfig(token?: string): Promise<Wso2ApiPlatformRuntimeConfig>;
   getApiWsdl(apiId: string, token?: string): Promise<Blob>;
+  listDocuments(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiDocumentListResponse>;
+  getDocument(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+  ): Promise<Wso2ApiDocument>;
+  createDocument(
+    entityRef: CompoundEntityRef,
+    input: CreateWso2ApiDocumentRequest,
+  ): Promise<Wso2ApiDocument>;
+  updateDocumentMetadata(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+    patch: UpdateWso2ApiDocumentMetadataRequest,
+  ): Promise<Wso2ApiDocument>;
+  deleteDocument(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+  ): Promise<void>;
+  getDocumentContentUrl(
+    entityRef: CompoundEntityRef,
+    documentId: string,
+  ): Promise<string>;
+  getDefinition(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiDefinitionResponse>;
+  upsertDefinition(
+    entityRef: CompoundEntityRef,
+    input: UpsertWso2ApiDefinitionRequest,
+  ): Promise<Wso2ApiDefinitionResponse>;
+  deleteDefinition(entityRef: CompoundEntityRef): Promise<void>;
+  previewDefinitionDiff(
+    entityRef: CompoundEntityRef,
+    content: string,
+  ): Promise<Wso2DefinitionDiffResponse>;
+  getPolicyArtifact(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiPolicyArtifactResponse>;
+  upsertPolicyArtifact(
+    entityRef: CompoundEntityRef,
+    input: UpsertWso2ApiPolicyArtifactRequest,
+  ): Promise<Wso2ApiPolicyArtifactResponse>;
+  previewPolicyDiff(
+    entityRef: CompoundEntityRef,
+    input: Wso2ApiPolicyArtifact,
+  ): Promise<Wso2PolicyDiffResponse>;
+  getApiPortalInfo(entityRef: CompoundEntityRef): Promise<Wso2ApiPortalInfo>;
+  /**
+   * accessToken is omitted for the 'service-account' strategy, where the
+   * backend holds its own API Portal identity and needs no token forwarded.
+   */
+  publishToApiPortal(
+    entityRef: CompoundEntityRef,
+    accessToken: string | undefined,
+    overrides: Wso2ApiPortalPublishOverrides,
+  ): Promise<Wso2ApiPortalPublishResult>;
+  getApiPortalSubscriptions(
+    entityRef: CompoundEntityRef,
+  ): Promise<Wso2ApiPortalSubscriptionsResponse>;
+  updateApiPortalSubscriptions(
+    entityRef: CompoundEntityRef,
+    planIds: string[],
+  ): Promise<Wso2ApiPortalSubscriptionsResponse>;
 }
