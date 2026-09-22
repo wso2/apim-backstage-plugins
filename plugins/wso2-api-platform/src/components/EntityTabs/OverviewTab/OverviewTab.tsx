@@ -42,7 +42,10 @@ import RouterIcon from '@material-ui/icons/Router';
 import FiberManualRecordIcon from '@material-ui/icons/FiberManualRecord';
 import SpeedIcon from '@material-ui/icons/Speed';
 import SecurityIcon from '@material-ui/icons/Security';
-import { Wso2ApiPortalPublishResult } from '../../../api';
+import {
+  Wso2ApiPortalAuthConfig,
+  Wso2ApiPortalPublishResult,
+} from '../../../api';
 import { formatLifecycleStatus, isServiceEntity } from '../../../utils';
 import { EntityWso2ServiceOverviewCard } from './components/ServiceOverviewCard';
 import { PublishToApiPortalDialog } from './components/PublishToApiPortalDialog';
@@ -53,6 +56,7 @@ import { useApiDefinition } from '../DefinitionTab/hooks/useApiDefinition';
 import { useApiDefinitionSource } from '../DefinitionTab/hooks/useApiDefinitionSource';
 
 const DISCOVERY_TYPE_ANNOTATION = 'wso2.com/api-discovery-type';
+const MANUAL_AUTH_CONFIG: Wso2ApiPortalAuthConfig = { mode: 'platform-login' };
 
 /** Pairs an AboutField with a leading icon for quick visual scanning. */
 const FieldRow = (props: { icon: ReactNode; children: ReactNode }) => (
@@ -121,7 +125,7 @@ const EntityWso2OverviewTabContent = () => {
 
   const configApi = useApi(configApiRef);
   const apiPortalBaseUrl = configApi.getOptionalString(
-    'wso2ApiPlatform.apiPortal.baseUrl',
+    'wso2ApiPlatformApiPortal.baseUrl',
   );
   const { info: apiPortalInfo, loading: apiPortalLoading } =
     useApiPortalCapabilities(entity, isGatewayDiscovered);
@@ -434,6 +438,7 @@ const EntityWso2OverviewTabContent = () => {
                 open={apiPortalDialogOpen}
                 onClose={() => setApiPortalDialogOpen(false)}
                 onPublished={handleApiPortalPublished}
+                authConfig={apiPortalInfo?.auth ?? MANUAL_AUTH_CONFIG}
               />
             </>
           )}
